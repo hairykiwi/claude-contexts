@@ -29,6 +29,13 @@ available. This branch targets Qt 6.x with KF6.
            -DCMAKE_BUILD_TYPE=Debug
 - Build command: make -j8
 
+## CLAUDE.md management
+This file lives in a separate repo: ~/claude-contexts/qelectrotech/CLAUDE.md
+It is symlinked into the QET project root:
+  ln -s ~/claude-contexts/qelectrotech/CLAUDE.md ~/qelectrotech/CLAUDE.md
+CLAUDE.md is listed in QET's .gitignore — it is not tracked by the QET repo.
+Backed up via: github.com/hairykiwi/claude-contexts
+
 ## Dev build setup (one-time, after clean reconfigure)
 Symlink source resource directories into the build dir so QET finds
 them when run from `build_qt6/`:
