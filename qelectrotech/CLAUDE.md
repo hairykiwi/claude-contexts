@@ -100,11 +100,20 @@ recreated after `rm -rf build_qt6/*`.
 
 Verified: 8598 elements load, EN language resolves, titleblocks visible.
 
+### Commit 5: Fix silent signal/slot connection failures on BorderTitleBlock
+- `sources/diagramview.cpp`: replace non-existent SIGNAL(diagramTitleChanged)
+  with &BorderTitleBlock::informationChanged (new-style); pre-existing bug
+  masked by old SIGNAL() macro syntax — window title now updates when
+  titleblock fields change
+- `sources/bordertitleblock.h/.cpp`: add setAutoPageNum(const QString &) public
+  slot (stores btb_auto_page_num_, emits needFolioData())
+- `sources/autoNum/ui/autonumberingdockwidget.cpp`: replace
+  SLOT(slot_setAutoPageNum(QString)) with &BorderTitleBlock::setAutoPageNum
+  using qOverload<QString> to disambiguate the overloaded signal
+
 ## Known remaining issues (not yet fixed)
 - `sources/main.cpp`: app name temporarily set to "QElectroTech-Qt6"
   to avoid SingleApplication conflict with Qt5 build — revert before PR
-- `BorderTitleBlock::diagramTitleChanged` signal missing — Qt6 migration
-- `BorderTitleBlock::slot_setAutoPageNum` slot missing — Qt6 migration
 - `QFont::setWeight: Weight must be between 1 and 1000, attempted to
   set 0` — Qt6 font weight range changed
 - `The requested buffer size is too big` — Qt6 SVG renderer stricter
