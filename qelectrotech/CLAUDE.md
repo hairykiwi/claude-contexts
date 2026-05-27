@@ -4,6 +4,18 @@
 - Always show commit messages for review before committing
 - Never commit sources/main.cpp — contains a temporary workaround
 
+## Testing requirements
+Before pushing any commit to origin, Claude must propose and the developer
+must perform a brief functional test relevant to the change:
+
+- Test format: numbered steps, clear ✅ expected / ❌ before-fix outcomes
+- Scope: targeted to the specific behaviour changed — not a full regression suite
+- Result: PASS or FAIL recorded in the session before git push proceeds
+- If FAIL: fix before pushing, do not push broken commits
+
+This applies to all source code commits. CMake, documentation, and
+tooling-only commits may be pushed without a functional test at discretion.
+
 ## Project overview
 QElectroTech (QET) is an open source Qt/C++ EDA tool for industrial
 electrical schematic documentation. It is NOT a PCB tool — it targets
