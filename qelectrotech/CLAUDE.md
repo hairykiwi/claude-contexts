@@ -3,6 +3,12 @@
 ## Claude Code instructions
 - Always show commit messages for review before committing
 - Never commit sources/main.cpp — contains a temporary workaround
+- After any source code commit, always rebuild AND run tests before
+  pushing — in this order: commit → rebuild → test → push:
+  cd ~/qelectrotech/build_qt6 && make -j8
+  (ensures GitRevision and binary reflect the latest commit)
+- When committing a source code fix, remove the corresponding item
+  from "Known remaining issues" in the same CLAUDE.md commit
 
 ## Testing requirements
 Before pushing any commit to origin, Claude must propose and the developer
@@ -15,6 +21,26 @@ must perform a brief functional test relevant to the change:
 
 This applies to all source code commits. CMake, documentation, and
 tooling-only commits may be pushed without a functional test at discretion.
+
+## Fix metrics logging
+For each source code fix, record the following alongside the commit entry:
+- Token cost: approximate session tokens consumed (visible in Claude Code footer)
+- Tool calls: number of search/read/bash calls before fix was proposed
+- Graph queries: number of /understand-chat calls used
+- First attempt: PASS/FAIL (did the fix compile and test correctly first time?)
+
+Example:
+  Token cost: ~12k | Tool calls: 8 | Graph queries: 1 | First attempt: FAIL→PASS
+
+Purpose: quantify Understand-Anything's contribution to fix efficiency.
+Useful for sharing with QET devs and the broader Qt6 migration community.
+
+First attempt notation:
+    PASS = correct first time
+    FAIL→PASS = corrected within session
+    FAIL→FAIL→PASS = multiple corrections (extend as needed)
+    PASS (untested) = compiled but not functionally verified
+    PARTIAL = some call sites fixed, others deferred
 
 ## Project overview
 QElectroTech (QET) is an open source Qt/C++ EDA tool for industrial
@@ -74,60 +100,16 @@ recreated after `rm -rf build_qt6/*`.
 - zsh: use heredoc (git commit -F - << 'EOF') for commit messages
   containing ! characters to avoid zsh history expansion errors
 
-## Fixes already committed to fork
-### Commit 1: macOS/Apple Silicon fixes for Qt6 build on Homebrew
-- `CMakeLists.txt`: PACKAGE_TESTS=OFF, two empty-destination install
-  lines commented out
-- `cmake/fetch_kdeaddons.cmake`: ECM_SKIP_QDOC_GENERATION=ON added
-- `sources/titleblock/helpercell.h`: explicit QGraphicsLayoutItem
-  include added for macOS MOC
-- `sources/projectview.h`: QWheelEvent::delta() → angleDelta().y()
-- `sources/TerminalStrip/ui/terminalstripmodel.h`: qHash uint → size_t
-- `sources/editor/elementscene.cpp`: static_cast<int> for qsizetype
-- `sources/TerminalStrip/terminalstrip.cpp`: static_cast<int> for
-  qsizetype
+## Fixes already committed
+See git log for full details:
+  git log upstream/qt6_cmake_joshua..HEAD
 
-### Commit 2: Fix QSignalMapper::mapped() deprecation for Qt6
-- exportdialog.cpp: SIGNAL(mapped(int)) → mappedInt (6 occurrences)
-- qetdiagrameditor.cpp: mapped(QWidget*) → mappedObject + lambda cast
-- qetapp.cpp: same pattern as qetdiagrameditor.cpp
-- titleblock/templatelogomanager.cpp: mapped(int) → mappedInt
-
-### Commit 3: Fix mangled .gitignore entry for build_qt6/
-- `.gitignore`: `!doc/doc-utilsbuild_qt6/` was two entries accidentally
-  merged; corrected to separate lines `!doc/doc-utils` and `build_qt6/`
-
-### Commit 4: Fix dev build resource paths on macOS (Debug builds)
-- `cmake/paths_compilation_installation.cmake`: Apple Debug builds now
-  set QET_COMMON_COLLECTION_PATH/QET_COMMON_TBT_PATH/QET_LANG_PATH
-  relative to binary ("elements/", "titleblocks/", "lang/") instead
-  of the bundle-relative "../Resources/" paths used by Release builds.
-  Adds QET_COMMON_COLLECTION_PATH_RELATIVE_TO_BINARY_PATH_VAR and
-  QET_LANG_PATH_RELATIVE_TO_BINARY_PATH_VAR CMake flags to signal
-  the relative-path mode.
-- `cmake/define_definitions.cmake`: Guards added around lines 27-41 so
-  that when the _VAR flags are set, INSTALL_PREFIX (/usr/local/) is
-  not prepended to the resource paths. Release and Linux builds are
-  unchanged.
-
-Verified: 8598 elements load, EN language resolves, titleblocks visible.
-
-### Commit 5: Fix silent signal/slot connection failures on BorderTitleBlock
-- `sources/diagramview.cpp`: replace non-existent SIGNAL(diagramTitleChanged)
-  with &BorderTitleBlock::informationChanged (new-style); pre-existing bug
-  masked by old SIGNAL() macro syntax — window title now updates when
-  titleblock fields change
-- `sources/bordertitleblock.h/.cpp`: add setAutoPageNum(const QString &) public
-  slot (stores btb_auto_page_num_, emits needFolioData())
-- `sources/autoNum/ui/autonumberingdockwidget.cpp`: replace
-  SLOT(slot_setAutoPageNum(QString)) with &BorderTitleBlock::setAutoPageNum
-  using qOverload<QString> to disambiguate the overloaded signal
+Current commit count ahead of upstream: 6
+Known remaining issues are listed below — keep in sync with commits.
 
 ## Known remaining issues (not yet fixed)
 - `sources/main.cpp`: app name temporarily set to "QElectroTech-Qt6"
   to avoid SingleApplication conflict with Qt5 build — revert before PR
-- `QFont::setWeight: Weight must be between 1 and 1000, attempted to
-  set 0` — Qt6 font weight range changed
 - `The requested buffer size is too big` — Qt6 SVG renderer stricter
 - `qAsConst()` → `std::as_const()` warnings throughout
 - Display menu missing entries for Collections and Templates windows
@@ -138,6 +120,11 @@ Verified: 8598 elements load, EN language resolves, titleblocks visible.
 - `QWidget::setLayout: Attempting to set QLayout on StyleEditor which
   already has a layout` — seen in element editor, Qt6 migration issue
 - `QBoxLayout::insert: index out of range` — seen on new diagram creation
+- `QObject::disconnect: wildcard call disconnects from destroyed signal of
+  AutoNumberingDockWidget` — fires on quit, minor
+- Font weight inconsistency between elements in Qt5-origin .qet files —
+  some elements saved with explicit Thin weight render lighter than Normal
+  weight elements; cosmetic issue, not introduced by Qt6 migration
 
 ## Contribution context
 - Fork: github.com/hairykiwi/qelectrotech-source-mirror
