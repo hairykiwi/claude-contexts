@@ -2,13 +2,38 @@
 
 ## Claude Code instructions
 - Always show commit messages for review before committing
-- Never commit sources/main.cpp — contains a temporary workaround
+- NEVER commit sources/main.cpp — it carries the temporary "QElectroTech-Qt6"
+  app-name workaround and must stay unstaged. Never use `git add -A` or
+  `git add .` blindly — stage named files only, so the workaround is never
+  swept into a commit (especially now the post-commit graph hook makes
+  commits happen more freely).
 - After any source code commit, always rebuild AND run tests before
   pushing — in this order: commit → rebuild → test → push:
   cd ~/qelectrotech/build_qt6 && make -j8
   (ensures GitRevision and binary reflect the latest commit)
 - When committing a source code fix, remove the corresponding item
   from "Known remaining issues" in the same CLAUDE.md commit
+- Before preparing any PR to upstream/qt6_cmake_joshua, exclude these
+  fork-only artifacts — they belong on the fork, not in upstream history:
+    - .understand-anything/  (generated knowledge graph, committed in bfc312780)
+    - CLAUDE.md  (already gitignored)
+  bfc312780 already committed the graph, so gitignoring now will NOT
+  un-commit it. Cut the PR from a clean branch off upstream and cherry-pick
+  only the genuine source/build fixes onto it (this also drops the
+  .gitignore / CLAUDE.md / graph housekeeping commits). Confirm with
+  Laurent/Joshua before including the graph in-tree.
+- Understand-Anything graph auto-update is enabled (/understand --auto-update):
+  a post-commit git hook incrementally patches .understand-anything/ so each
+  commit lands with a matching graph. Expect knowledge-graph.json / meta.json /
+  fingerprints.json to change alongside source commits — this is intended, not
+  stray; do not revert or separately stage them. Never commit
+  .understand-anything/intermediate/ or diff-overlay.json (local scratch;
+  keep gitignored). The post-commit hook means the "commit → rebuild → test →
+  push" rule above still applies — the hook runs at commit, before rebuild.
+  NOTE: the hook lives in .git/hooks/ and is per-clone — it is NOT committed
+  and does NOT travel with the repo. A fresh clone (e.g. the clean branch cut
+  off upstream for a PR) will NOT have it; re-run /understand --auto-update in
+  that clone to reinstall; "Enabled" here is true for the working clone only.
 
 ## Testing requirements
 Before pushing any commit to origin, Claude must propose and the developer
@@ -103,20 +128,19 @@ recreated after `rm -rf build_qt6/*`.
 ## Fixes already committed
 See git log for full details:
   git log upstream/qt6_cmake_joshua..HEAD
-
-Current commit count ahead of upstream: 6
+To get the current count: git rev-list --count upstream/qt6_cmake_joshua..HEAD
 Known remaining issues are listed below — keep in sync with commits.
 
 ## Known remaining issues (not yet fixed)
 - `sources/main.cpp`: app name temporarily set to "QElectroTech-Qt6"
   to avoid SingleApplication conflict with Qt5 build — revert before PR
+- .understand-anything/ knowledge graph committed to branch (bfc312780) —
+  must be excluded from any upstream PR (see PR-prep instructions above)
 - `The requested buffer size is too big` — Qt6 SVG renderer stricter
 - `qAsConst()` → `std::as_const()` warnings throughout
 - Display menu missing entries for Collections and Templates windows
   (found via Help → Search "Collections" as workaround) — pre-existing
   Qt6 migration issue
-- `QDomDocument called with unopened QIODevice` — Qt6 stricter I/O,
-  seen when loading titleblock templates
 - `QWidget::setLayout: Attempting to set QLayout on StyleEditor which
   already has a layout` — seen in element editor, Qt6 migration issue
 - `QBoxLayout::insert: index out of range` — seen on new diagram creation
@@ -124,7 +148,8 @@ Known remaining issues are listed below — keep in sync with commits.
   AutoNumberingDockWidget` — fires on quit, minor
 - Font weight inconsistency between elements in Qt5-origin .qet files —
   some elements saved with explicit Thin weight render lighter than Normal
-  weight elements; cosmetic issue, not introduced by Qt6 migration
+  weight elements; cosmetic, not introduced by Qt6 migration, and separate
+  from the weight-0 load fix (8fd5431be)
 
 ## Contribution context
 - Fork: github.com/hairykiwi/qelectrotech-source-mirror
@@ -141,5 +166,7 @@ Known remaining issues are listed below — keep in sync with commits.
 - QSignalMapper::mapped(T) → mappedInt / mappedObject / mappedString
 - Brace-initialised int from qsizetype → static_cast<int>()
 - SQLite: QSqlDatabase::exec() deprecated → use QSqlQuery::exec()
-- QFont weight: Qt6 requires 1-1000 range (ThinLight=25 not 0)
+- QFont weight: Qt6 requires 1–1000 (Qt5 serialised Thin as 0, which Qt6
+  rejects). Remap font weight <1 → Thin (100) at load via
+  QETApp::sanitizeFontString(); read-time only, never written back.
 - QDomDocument: device must be open before passing to setContent()
