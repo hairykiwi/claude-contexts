@@ -7,8 +7,8 @@
   same step. Staging and committing are separate from approval.
 - NEVER commit sources/main.cpp — it carries the temporary "QElectroTech-Qt6"
   app-name workaround and must stay unstaged. Never use `git add -A` or
-  `git add .` blindly — stage named files only, so the workaround is never
-  swept into a commit — stage named files only.
+  `git add .` blindly — stage named files only, so the workaround is
+  never swept into a commit.
 - After any source code commit, always rebuild AND run tests before
   pushing — in this order: commit → rebuild → test → push:
   cd ~/qelectrotech/build_qt6 && make -j8
