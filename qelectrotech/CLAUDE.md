@@ -1,12 +1,14 @@
 # QElectroTech — Claude Code Context
 
 ## Claude Code instructions
-- Always show commit messages for review before committing
+- Before committing, show BOTH the proposed commit message AND the staged
+  file list (`git status --short`) for review, and WAIT for explicit
+  approval. Do not self-approve with "diff looks right" and commit in the
+  same step. Staging and committing are separate from approval.
 - NEVER commit sources/main.cpp — it carries the temporary "QElectroTech-Qt6"
   app-name workaround and must stay unstaged. Never use `git add -A` or
   `git add .` blindly — stage named files only, so the workaround is never
-  swept into a commit (especially now the post-commit graph hook makes
-  commits happen more freely).
+  swept into a commit — stage named files only.
 - After any source code commit, always rebuild AND run tests before
   pushing — in this order: commit → rebuild → test → push:
   cd ~/qelectrotech/build_qt6 && make -j8
@@ -22,18 +24,16 @@
   only the genuine source/build fixes onto it (this also drops the
   .gitignore / CLAUDE.md / graph housekeeping commits). Confirm with
   Laurent/Joshua before including the graph in-tree.
-- Understand-Anything graph auto-update is enabled (/understand --auto-update):
-  a post-commit git hook incrementally patches .understand-anything/ so each
-  commit lands with a matching graph. Expect knowledge-graph.json / meta.json /
-  fingerprints.json to change alongside source commits — this is intended, not
-  stray; do not revert or separately stage them. Never commit
-  .understand-anything/intermediate/ or diff-overlay.json (local scratch;
-  keep gitignored). The post-commit hook means the "commit → rebuild → test →
-  push" rule above still applies — the hook runs at commit, before rebuild.
-  NOTE: the hook lives in .git/hooks/ and is per-clone — it is NOT committed
-  and does NOT travel with the repo. A fresh clone (e.g. the clean branch cut
-  off upstream for a PR) will NOT have it; re-run /understand --auto-update in
-  that clone to reinstall; "Enabled" here is true for the working clone only.
+- Understand-Anything graph: auto-update is NOT installed in this clone and
+  will NOT be reinstalled — graph updates are MANUAL. The post-commit hook
+  lives in .git/hooks/ (per-clone, never committed, does not travel); a fresh
+  clone won't have it and we're not adding it here. Do not narrate graph files
+  as "auto-patched" — knowledge-graph.json / meta.json / fingerprints.json
+  change ONLY when manually rebuilt via /understand-chat. When rebuilt, commit
+  those three tracked JSONs as a standalone tooling commit — never fold them
+  into a source commit. Never stage .understand-anything/intermediate/ or
+  diff-overlay.json (local scratch; keep gitignored). Graph is fork-only —
+  exclude from any upstream PR.
 
 ## Testing requirements
 Before pushing any commit to origin, Claude must propose and the developer
@@ -43,6 +43,16 @@ must perform a brief functional test relevant to the change:
 - Scope: targeted to the specific behaviour changed — not a full regression suite
 - Result: PASS or FAIL recorded in the session before git push proceeds
 - If FAIL: fix before pushing, do not push broken commits
+- Ordering: the functional test must PASS before `git push`, regardless of
+  where the rebuild falls. The commit→rebuild→test→push sequence ensures
+  GitRevision reflects the commit; it does not license pushing an untested
+  binary. If the test ran against an identical pre-commit build, say so
+  explicitly rather than implying a post-rebuild re-test occurred.
+- Before/after evidence: where a "before" Terminal state is cheaply
+  reproducible, capture both before and after for the worked issue. Where
+  the fix is latent or the test only confirms ABSENCE of a warning (no
+  reproducible before-state), state "absence-confirmed" explicitly instead
+  of implying a diff.
 
 This applies to all source code commits. CMake, documentation, and
 tooling-only commits may be pushed without a functional test at discretion.
