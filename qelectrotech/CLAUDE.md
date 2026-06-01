@@ -34,6 +34,20 @@
   into a source commit. Never stage .understand-anything/intermediate/ or
   diff-overlay.json (local scratch; keep gitignored). Graph is fork-only —
   exclude from any upstream PR.
+  
+## Coding guidelines
+**Highlight ambiguity before coding**
+If multiple interpretations exist, present them — don't pick silently.
+**Simplicity first**
+Minimum code that solves the problem — no speculative features,
+no abstractions for single-use code, no "flexibility" that wasn't
+asked for. If you write 200 lines and it could be 50, rewrite it.
+**Surgical changes**
+Touch only what the task requires:
+- Don't improve adjacent code, comments, or formatting.
+- Match existing style even if you'd do it differently.
+- If your changes make imports/variables/functions unused, remove them.
+- Don't remove pre-existing dead code unless asked — mention it instead.
 
 ## Testing requirements
 Before pushing any commit to origin, Claude must propose and the developer
