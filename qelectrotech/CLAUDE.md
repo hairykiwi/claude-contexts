@@ -161,7 +161,10 @@ Known remaining issues are listed below — keep in sync with commits.
 - .understand-anything/ knowledge graph committed to branch (bfc312780) —
   must be excluded from any upstream PR (see PR-prep instructions above)
 - `The requested buffer size is too big` — Qt6 SVG renderer stricter
-- `qAsConst()` → `std::as_const()` warnings throughout
+- `QVariant::Type` / `.type()` / `.canConvert()` → QMetaType equivalents — `userproperties.cpp`, `numerotationcontext.cpp`
+- `setNamedColor()` → `QColor::fromString()` — `terminalstripbridge.cpp`
+- `QLocale::nativeCountryName()` → `nativeTerritoryName()` — `machine_info.cpp`
+- `QString::count()` → `size()` — `elementscollectionwidget.cpp`
 - Display menu missing entries for Collections and Templates windows
   (found via Help → Search "Collections" as workaround) — pre-existing
   Qt6 migration issue
