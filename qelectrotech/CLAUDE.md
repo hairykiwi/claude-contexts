@@ -9,10 +9,19 @@
   app-name workaround and must stay unstaged. Never use `git add -A` or
   `git add .` blindly — stage named files only, so the workaround is
   never swept into a commit.
-- After any source code commit, always rebuild AND run tests before
-  pushing — in this order: commit → rebuild → test → push:
-  cd ~/qelectrotech/build_qt6 && make -j8
-  (ensures GitRevision and binary reflect the latest commit)
+- Source code change workflow — full sequence for every source code change,
+  from edit through push:
+    1. Edit source
+    2. cd ~/qelectrotech/build_qt6 && make -j8
+       (compile check — confirms the edit builds cleanly)
+    3. Functional test (run against this pre-commit build)
+    4. git commit (named files only — never main.cpp)
+    5. cd ~/qelectrotech/build_qt6
+       cmake .. [see Build environment section > Canonical CMake configure command]
+       make -j8
+       (cmake .. is required — git_last_commit_sha.cmake runs at configure
+       time only, so make alone won't refresh GitRevision)
+    6. git push origin qt6_cmake_joshua
 - When committing a source code fix, remove the corresponding item
   from "Known remaining issues" in the same CLAUDE.md commit
 - Before preparing any PR to upstream/qt6_cmake_joshua, exclude these
@@ -57,11 +66,8 @@ must perform a brief functional test relevant to the change:
 - Scope: targeted to the specific behaviour changed — not a full regression suite
 - Result: PASS or FAIL recorded in the session before git push proceeds
 - If FAIL: fix before pushing, do not push broken commits
-- Ordering: the functional test must PASS before `git push`, regardless of
-  where the rebuild falls. The commit→rebuild→test→push sequence ensures
-  GitRevision reflects the commit; it does not license pushing an untested
-  binary. If the test ran against an identical pre-commit build, say so
-  explicitly rather than implying a post-rebuild re-test occurred.
+- Ordering: the functional test (Source code change workflow > step 3) must
+  PASS before commit (step 4) and push (step 6).
 - Before/after evidence: where a "before" Terminal state is cheaply
   reproducible, capture both before and after for the worked issue. Where
   the fix is latent or the test only confirms ABSENCE of a warning (no
@@ -107,7 +113,7 @@ available. This branch targets Qt 6.x with KF6.
 - KF6: built from source via FetchContent (BUILD_KF6=ON), v6.22.0
 - pugixml: system install via Homebrew
 - Build directory: `build_qt6/`
-- CMake configure command:
+- Canonical CMake configure command:
   cmake .. -DCMAKE_PREFIX_PATH=/opt/homebrew/opt/qt \
            -DQt6_DIR=/opt/homebrew/opt/qt/lib/cmake/Qt6 \
            -DBUILD_KF6=ON \
