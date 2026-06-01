@@ -193,4 +193,4 @@ This branch is a Qt6 port. Common patterns to recognise when reading or fixing c
 
 ---
 
-*Generated from Understand-Anything knowledge graph — graph commit `8fd5431be`, 1585 nodes / 2945 edges, 864 analysed files.*
+*Generated from Understand-Anything knowledge graph (graph commit `28bfb177`, 1585 nodes / 2945 edges, 864 analysed files). THIS document is not auto-updated. It reflects the QET codebase state only at time of generation: expect the information it contains to drift over time.*
