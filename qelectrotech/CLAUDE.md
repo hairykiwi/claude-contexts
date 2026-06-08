@@ -78,17 +78,22 @@ This applies to all source code commits. CMake, documentation, and
 tooling-only commits may be pushed without a functional test at discretion.
 
 ## Fix metrics logging
-For each source code fix, record the following alongside the commit entry:
-- Token cost: approximate session tokens consumed (visible in Claude Code footer)
-- Tool calls: number of search/read/bash calls before fix was proposed
-- Graph queries: number of /understand-chat calls used
-- First attempt: PASS/FAIL (did the fix compile and test correctly first time?)
+For each source code fix, append an entry to:
+  ~/claude-contexts/qelectrotech/fix-metrics.md
+
+Do NOT include metrics in commit messages — they are personal development
+records, not upstream history.
+
+Each entry format:
+  ## <commit hash> — <commit subject>
+  Token cost: ~ | Tool calls:  | Graph queries:  | First attempt:
 
 Example:
-  Token cost: ~12k | Tool calls: 8 | Graph queries: 1 | First attempt: FAIL→PASS
+  ## 269ab1dd3 — Add folio-level Mirror/Flip for placed elements
+  Token cost: ~180k | Tool calls: 30 | Graph queries: 1 | First attempt: PASS
 
-Purpose: quantify Understand-Anything's contribution to fix efficiency.
-Useful for sharing with QET devs and the broader Qt6 migration community.
+Purpose: quantify Claude Code / Understand-Anything's contribution to fix
+efficiency over time. Personal record — not for upstream.
 
 First attempt notation:
     PASS = correct first time
