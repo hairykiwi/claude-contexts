@@ -24,5 +24,5 @@ Token cost: (same session) | Tool calls: 3 | Graph queries: 0 | First attempt: P
 ## d97501d12 — Fix conductor orientation on folio-level mirror/flip
 Token cost: (same session) | Tool calls: 4 | Graph queries: 0 | First attempt: PASS
 
-## (pending) — Add M/F keyboard shortcuts for Mirror/Flip in folio view
-Token cost: ~9k | Tool calls: 3 | Graph queries: 0 | First attempt: PASS
+## 99402931d — Add M/F keyboard shortcuts for Mirror/Flip in folio view
+Token cost: ~12k | Tool calls: 5 | Graph queries: 0 | First attempt: PASS
