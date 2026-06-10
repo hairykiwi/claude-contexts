@@ -37,3 +37,16 @@ Graph queries: 0
 Tool calls / token cost: not captured
 Scope: ungrouped dynamic text only; grouped-rotated nested-transform defect
 deferred.
+
+## 05bcba506 — Fix grouped rotated dynamic text corruption on folio mirror/flip save
+First attempt: PASS — patch compiled and passed full acceptance + regression
+(3-line group, element-rot 90/180 + mirror, mirror+flip; all det-parity +1,
+idempotent re-save) on first build. Reached via structured multi-session
+diagnosis (Checks A/B/C: serialization dump, addToGroup matrix trace, live-vs-reload
+sceneTransform) before any patch. One pre-apply review refinement (hard assert
+-> non-fatal qWarning tripwire); bare correctAngle(group->rotation()) confirmed
+byte-identical to old path.
+Graph queries: 0
+Tool calls / token cost: not captured
+Scope: save-path serialization for grouped text. Sibling deferred: genuine ungroup
+of a mirrored element (removeFromGroup/1367 path); pre-damaged-file healing.
