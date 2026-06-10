@@ -26,3 +26,14 @@ Token cost: (same session) | Tool calls: 4 | Graph queries: 0 | First attempt: P
 
 ## 99402931d — Add M/F keyboard shortcuts for Mirror/Flip in folio view
 Token cost: ~12k | Tool calls: 5 | Graph queries: 0 | First attempt: PASS
+
+## c6344261f — Fix rotated dynamic text under folio mirror/flip
+First attempt: No — 2 math iterations (initial t=E·K⁻¹ wrong for rotated
+text; corrected to t=R(rot0)⁻¹·E·K⁻¹ after recognising Qt QTransform
+pre-multiplies / setTransform applies outside item rotation) + 1 live
+debug cycle to confirm setTransform is honoured and isolate the bug as
+pure composition-order math.
+Graph queries: 0
+Tool calls / token cost: not captured
+Scope: ungrouped dynamic text only; grouped-rotated nested-transform defect
+deferred.

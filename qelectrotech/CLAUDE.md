@@ -92,6 +92,13 @@ Example:
   ## 269ab1dd3 — Add folio-level Mirror/Flip for placed elements
   Token cost: ~180k | Tool calls: 30 | Graph queries: 1 | First attempt: PASS
 
+Honesty requirement: metrics must be observed, never guessed. Record
+`First attempt` truthfully (e.g. "No — N iterations" when corrected within
+session, not PASS). When a counter is not introspectable (e.g. tool-call
+count or token cost not visible this session), write `not captured` rather
+than estimating a number. A blank or honest "not captured" is always
+preferred over a fabricated figure.
+
 Purpose: quantify Claude Code / Understand-Anything's contribution to fix
 efficiency over time. Personal record — not for upstream.
 
@@ -167,6 +174,12 @@ To get the current count: git rev-list --count upstream/qt6_cmake_joshua..HEAD
 Known remaining issues are listed below — keep in sync with commits.
 
 ## Known remaining issues (not yet fixed)
+- Grouped dynamic text (ElementTextItemGroup) in a ROTATED element diverges
+  under folio mirror/flip — same signature as the original rotated-text bug
+  fixed in c6344261f, but at the group's nested transform level. Ungrouped
+  text and grouped text in an unrotated element are correct. Separate
+  nested-transform defect in `Element::applyMirrorFlip()`
+  (`sources/qetgraphicsitem/element.cpp`) — to be addressed in a follow-up
 - `sources/main.cpp`: app name temporarily set to "QElectroTech-Qt6"
   to avoid SingleApplication conflict with Qt5 build — revert before PR
 - .understand-anything/ knowledge graph committed to branch (bfc312780) —
