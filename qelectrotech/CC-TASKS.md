@@ -16,6 +16,54 @@ orientation and future-fix insight. Don't duplicate diffs here; do keep reasonin
 
 ## ACTIVE
 
+### Grouped/element rotated text displaced on LIVE rotate (display-only)  · OPEN (diagnosed, fix parked)
+**Area:** element rotation render · **Branch:** fix-grouped-text-rotation-pivot
+**Location:** `Element` rotation path / `element.cpp` (NOT elementtextitemgroup.cpp)
+
+**Symptom:** When a placed element is rotated live (interactive rotate), grouped
+(and ungrouped) text displaces — orbits to a wrong position; at 90°/270° lines
+overlap. Save→reload ALWAYS renders correctly. So this is DISPLAY-ONLY; saved
+data is correct.
+
+**Diagnosis (this session, confirmed by instrumentation — do NOT re-derive):**
+- The text GROUP is a passive, correctly-positioned child at constant element-
+  local pos (-12,151). updateAlignment() is NOT the bug site — it recomputes the
+  group's already-correct internal layout. A `rotationChanged → updateAlignment`
+  connection was tried: it FIRES on live rotate but does NOT fix the render.
+  Confirmed inert; reverted.
+- Correct rendering = element rotated about transformOriginPoint (0,0) PLUS a
+  pos COMPENSATION. Evidence: `Element::fromXml` reconstruction sets element
+  pos by rotation — 0°→(370,320), 180°→(850,350) — while transformOriginPoint
+  stays (0,0) and boundingRect is constant (-60,-105 120x210). The reconstructed
+  (saved+reloaded) render is correct because it applies this pos compensation.
+- The LIVE rotate path does NOT apply that compensation. Confirmed: an
+  `Element::itemChange()` hook on `ItemRotationHasChanged` was added and dumped —
+  it NEVER FIRES on live interactive rotate (zero dumps during rotation, while
+  the group's updateAlignment fired normally). So the element's itemChange
+  rotation-notification path is not reached on the live rotate.
+- Suspected cause: element likely lacks `QGraphicsItem::ItemSendsGeometryChanges`
+  flag (gates itemChange transform/rotation callbacks), OR QET's rotate applies
+  rotation via a path that bypasses the flagged itemChange. The `rotationChanged`
+  SIGNAL fires (group connection proved it) but `itemChange(ItemRotationHasChanged)`
+  does not — that divergence is the thread to pull.
+
+**Fix direction (next session):**
+Make live element rotation apply the same pos-compensation that `Element::fromXml`
+applies. Two candidate routes:
+  (a) enable ItemSendsGeometryChanges so itemChange(ItemRotationHasChanged) fires
+      live, then apply the compensation there; OR
+  (b) hook the element's existing `rotationChanged` signal at the ELEMENT level
+      (not the group) to recompute/compensate pos on rotate.
+First read how fromXml computes the rotated pos (element.cpp:848 region, the
+reconstruction dump source) — that IS the compensation math to mirror onto the
+live path. Verify against the dumped values (180° → pos (850,350)).
+
+**Severity:** low — display-only, save+reload corrects it; data always sound.
+**Relation:** this is the root of Finding 1 (pre-existing rotation bug, confirmed
+on stock Qt5) AND likely Finding 2 (mirror/flip of rotated grouped text). Fixing
+the element-level live pos-compensation may resolve both. Bug 2 (ungrouped text
+de-rotation/position at 90/270, save doesn't fix) is SEPARATE — own task.
+
 ### Genuine ungroup of a mirrored element displaces text  · DEFERRED
 **Area:** element text groups · **Branch:** folio-mirror-flip
 **Location:** `Element::removeTextFromGroup` → `elementtextitemgroup.cpp:1367`
