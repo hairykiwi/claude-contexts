@@ -16,14 +16,18 @@
     1. Edit source
     2. cd ~/qelectrotech/build_qt6 && make -j8
        (compile check — confirms the edit builds cleanly)
-    3. Functional test (run against this pre-commit build)
-    4. git commit (named files only — never main.cpp)
-    5. cd ~/qelectrotech/build_qt6
+    3. Confirm fresh binary before testing: ls -la build_qt6/qelectrotech shows current
+       mtime, AND the relaunched app's QET > About / startup-log "Built ... Date" matches. 
+       Never run a functional test against a binary whose timestamp predates the edit —
+       a stale-binary test produces false FAILs (and false PASSes).
+    4. Functional test (run against this pre-commit build)
+    5. git commit (named files only — never main.cpp)
+    6. cd ~/qelectrotech/build_qt6
        cmake .. [see Build environment section > Canonical CMake configure command]
        make -j8
        (cmake .. is required — git_last_commit_sha.cmake runs at configure
        time only, so make alone won't refresh GitRevision)
-    6. git push origin <branch>
+    7. git push origin <branch>
 - When committing a source code fix, remove the corresponding item
   from "Known remaining issues" in the same CLAUDE.md commit
 - Before preparing any PR to upstream, exclude these fork-only artifacts —
