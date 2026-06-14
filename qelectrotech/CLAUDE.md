@@ -161,7 +161,16 @@ just the touched file(s) against the target base.
            -DCMAKE_POLICY_VERSION_MINIMUM=3.5 \
            -DCMAKE_POLICY_DEFAULT_CMP0002=OLD \
            -DCMAKE_BUILD_TYPE=Debug
-- Build command: make -j8  (or: cmake --build . -j$(sysctl -n hw.ncpu))
+- Build command: make -j8
+  (-j8 is plenty for single-file test rebuilds; core count is within noise
+   there and only matters for a full KF6-from-source rebuild. M4 has 10 cores.)
+- After ANY `cmake ..` configure (full or reconfigure), VERIFY the dev paths
+  resolved. Run the grep SEPARATELY — do NOT pipe cmake through grep: piping
+  hides non-matching errors and makes the exit status grep's, not cmake's
+  (so a failed configure could silently proceed to make). Either:
+    grep -iE "QET_LANG_PATH|relative to binary" <configure output>
+  or just scan the printed "Paths used for compilation" block. Confirm the
+  paths show e.g. `QET_LANG_PATH lang/ (relative to binary)` — NOT `/usr/local/...`.
 
 ## macOS dev build — RECOVERY RECIPE (apply BEFORE attempting to build/run a fresh checkout)
 Fresh `upstream/qt6_cmake_joshua` (and `master`) FAIL to build AND fail to load
@@ -219,8 +228,8 @@ next to the binary in build_qt6/ instead of the install path.
   and it (a) forces a slow KF6-from-source rebuild and (b) DESTROYS the
   build_qt6/ symlinks (see Dev build setup). On 2026-06-14, reconfigure-only
   picked up the path changes and ran correctly without a wipe.
-- VERIFY in the configure output the paths show e.g.
-  `QET_LANG_PATH lang/ (relative to binary)` — NOT `/usr/local/...`.
+- VERIFY the dev paths resolved (see Build environment > path-verify step):
+  the configure output must show `... (relative to binary)`, NOT `/usr/local/...`.
 - Once PR #1 (build fixes) is prepared as a clean branch, THAT branch becomes
   the canonical recovery source instead of cherry-picking individual files.
 
