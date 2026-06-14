@@ -16,10 +16,15 @@
     1. Edit source
     2. cd ~/qelectrotech/build_qt6 && make -j8
        (compile check — confirms the edit builds cleanly)
-    3. Confirm fresh binary before testing: ls -la build_qt6/qelectrotech shows current
-       mtime, AND the relaunched app's QET > About / startup-log "Built ... Date" matches. 
-       Never run a functional test against a binary whose timestamp predates the edit —
-       a stale-binary test produces false FAILs (and false PASSes).
+    3. Confirm fresh binary before testing: `ls -la build_qt6/qelectrotech`
+       shows a current mtime — this is the AUTHORITATIVE freshness check; it
+       updates on every relink. NOTE: QET > About "Built ... Date" and
+       GitRevision do NOT reliably update for a single-file UNCOMMITTED change
+       — the date macro only refreshes when its own translation unit
+       recompiles, and GitRevision only at commit + configure. So trust the
+       binary mtime, NOT the About strings, for pre-commit test freshness.
+       Never run a functional test against a binary whose mtime predates the
+       edit — a stale-binary test produces false FAILs (and false PASSes).
     4. Functional test (run against this pre-commit build)
     5. git commit (named files only — never main.cpp)
     6. cd ~/qelectrotech/build_qt6
