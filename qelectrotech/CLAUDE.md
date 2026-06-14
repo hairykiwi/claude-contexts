@@ -8,7 +8,9 @@
 - NEVER commit sources/main.cpp — it carries the temporary "QElectroTech-Qt6"
   app-name workaround and must stay unstaged. Never use `git add -A` or
   `git add .` blindly — stage named files only, so the workaround is
-  never swept into a commit.
+  never swept into a commit. NOTE: the working tree normally carries SEVERAL
+  uncommitted local build-enablers (see "macOS dev build — recovery recipe"),
+  not just main.cpp — so `git add <named files>` discipline matters more than ever.
 - Source code change workflow — full sequence for every source code change,
   from edit through push:
     1. Edit source
@@ -21,17 +23,17 @@
        make -j8
        (cmake .. is required — git_last_commit_sha.cmake runs at configure
        time only, so make alone won't refresh GitRevision)
-    6. git push origin qt6_cmake_joshua
+    6. git push origin <branch>
 - When committing a source code fix, remove the corresponding item
   from "Known remaining issues" in the same CLAUDE.md commit
-- Before preparing any PR to upstream/qt6_cmake_joshua, exclude these
-  fork-only artifacts — they belong on the fork, not in upstream history:
+- Before preparing any PR to upstream, exclude these fork-only artifacts —
+  they belong on the fork, not in upstream history:
     - .understand-anything/  (generated knowledge graph, committed in bfc312780)
     - CLAUDE.md  (already gitignored)
   bfc312780 already committed the graph, so gitignoring now will NOT
-  un-commit it. Cut the PR from a clean branch off upstream and cherry-pick
-  only the genuine source/build fixes onto it (this also drops the
-  .gitignore / CLAUDE.md / graph housekeeping commits). Confirm with
+  un-commit it. Cut the PR from a clean branch off the PR-target and
+  cherry-pick only the genuine source/build fixes onto it (this also drops
+  the .gitignore / CLAUDE.md / graph housekeeping commits). Confirm with
   Laurent/Joshua before including the graph in-tree.
 - Understand-Anything graph: auto-update is NOT installed in this clone and
   will NOT be reinstalled — graph updates are MANUAL. The post-commit hook
@@ -43,7 +45,7 @@
   into a source commit. Never stage .understand-anything/intermediate/ or
   diff-overlay.json (local scratch; keep gitignored). Graph is fork-only —
   exclude from any upstream PR.
-  
+
 ## Coding guidelines
 **Highlight ambiguity before coding**
 If multiple interpretations exist, present them — don't pick silently.
@@ -115,9 +117,32 @@ electrical schematic documentation. It is NOT a PCB tool — it targets
 IEC 60617 wiring diagrams, terminal strips, and multi-folio
 documentation.
 
-## Active branch
-`qt6_cmake_joshua` — Qt6 port branch. Do NOT assume Qt5 APIs are
-available. This branch targets Qt 6.x with KF6.
+## Active branch / current work
+- Long-running integration branch on the fork: `qt6_cmake_joshua`.
+- CURRENT feature/fix work happens on dedicated branches cut from a tree
+  that BUILDS (see "Branching lesson" below), e.g. `folio-mirror-flip`
+  (feature, done/posted) and `fix-grouped-text-rotation-pivot` (active).
+- Do NOT assume Qt5 APIs are available. Targets Qt 6.x with KF6.
+
+### Two-PR plan (folio mirror/flip work)
+1. **macOS Qt6 build fixes** — own branch; the genuine upstream-worthy build
+   fixes from the recovery recipe below (NOT main.cpp, NOT the obsolete
+   projectview signature changes). Awaiting Laurent's reply on the CMakeLists
+   guard form before sending. Target: master (build fixes are version-agnostic).
+2. **Rotation-pivot bug fix** — own branch (`fix-grouped-text-rotation-pivot`);
+   `elementtextitemgroup.cpp` updateAlignment(). Target master at PR time
+   (bug file is byte-identical master/joshua). Rebase after PR #1 lands.
+- Feature PR (folio mirror/flip) is already implemented on `folio-mirror-flip`;
+  rebase/submit after the above land. Laurent invited it to master (pid 23013).
+
+### Branching lesson (IMPORTANT — avoids re-deriving build fixes)
+Develop on a tree that ALREADY BUILDS; reconcile to the PR-target base only
+at PR time. Do NOT cut a working branch off FRESH upstream and then rediscover
+every macOS build fix — that cost most of a session on 2026-06-14. Fresh
+`upstream/qt6_cmake_joshua` and `master` do NOT build/run on macOS out of the
+box. The fix file for a given bug is usually byte-identical across branches, so
+you can develop on the fork's working tree and still produce a clean PR diff of
+just the touched file(s) against the target base.
 
 ## Build environment (macOS Apple Silicon)
 - Hardware: Mac Mini M4, macOS Tahoe (26.5)
@@ -132,7 +157,68 @@ available. This branch targets Qt 6.x with KF6.
            -DCMAKE_POLICY_VERSION_MINIMUM=3.5 \
            -DCMAKE_POLICY_DEFAULT_CMP0002=OLD \
            -DCMAKE_BUILD_TYPE=Debug
-- Build command: make -j8
+- Build command: make -j8  (or: cmake --build . -j$(sysctl -n hw.ncpu))
+
+## macOS dev build — RECOVERY RECIPE (apply BEFORE attempting to build/run a fresh checkout)
+Fresh `upstream/qt6_cmake_joshua` (and `master`) FAIL to build AND fail to load
+resources on macOS/Qt6. macOS+Qt6+recent-Clang is the canary combination almost
+nobody else builds, so these gaps survive upstream undetected. Apply this recipe
+FIRST on any fresh checkout — before cmake, before make, before launch.
+ALL fixes already exist on `origin/qt6_cmake_joshua` and are recoverable in
+one command per file — do NOT re-derive them.
+
+Recover each file (run from REPO ROOT, not build_qt6/):
+    git checkout origin/qt6_cmake_joshua -- <file>
+
+### Set A — make it BUILD (genuine upstream fixes; PR #1 candidates)
+- `CMakeLists.txt` — guard the Linux-only install(FILES) MIME + appdata lines
+  in `if(UNIX AND NOT APPLE) ... endif()`. Empty QET_APPDATA_PATH /
+  QET_MIME_PACKAGE_PATH on macOS => "install FILES given no DESTINATION".
+  USE THE GUARDED FORM (matches the existing paths-file idiom), NOT the old
+  comment-out. Pending Laurent's preference on form.
+- `cmake/fetch_kdeaddons.cmake` — add `set(ECM_SKIP_QDOC_GENERATION ON)`
+- `sources/TerminalStrip/ui/terminalstripmodel.h` — qHash `uint`→`size_t` (x2:
+  QColor and QPointer<Element> overloads). Qt6 qHash is size_t-based; uint
+  overload is ambiguous.
+- `sources/TerminalStrip/terminalstrip.cpp` — `static_cast<int>(indexOf(...))`
+  (Qt6 indexOf returns qsizetype)
+- `sources/editor/elementscene.cpp` — `static_cast<int>(selectedItems().size())`
+- `sources/projectview.h` — **CAUTION, do NOT bulk-copy from the fork.** The
+  fork's version carries STALE removeDiagram/moveDiagram signature + slot
+  changes that DISAGREE with current upstream projectview.cpp and break the
+  build. Instead: take CURRENT upstream projectview.h and apply ONLY
+  `event->delta()` → `event->angleDelta().y()` on the two wheel-event lines
+  (~47 and ~52). Nothing else.
+
+### Set B — make it RUN (find elements/lang/titleblocks; dev-only)
+These make a Debug build use binary-relative resource paths so QET finds data
+next to the binary in build_qt6/ instead of the install path.
+- `cmake/paths_compilation_installation.cmake` — APPLE block splits on
+  `CMAKE_BUILD_TYPE STREQUAL "Debug"`: Debug => bare `elements/` `lang/`
+  `titleblocks/` + `add_compile_definitions(..._RELATIVE_TO_BINARY_PATH)` and
+  set the `..._RELATIVE_TO_BINARY_PATH_VAR ON`; Release => keeps
+  `../Resources/...` bundle paths.
+- `cmake/define_definitions.cmake` — `if(DEFINED ..._RELATIVE_TO_BINARY_PATH_VAR)`
+  guards that emit the bare path WITHOUT prepending INSTALL_PREFIX (/usr/local/).
+- Symptom if missing: French-only UI, no symbol library, no templates. NOTE the
+  language symptom is a PATH problem, not a setting — setting lang=en alone does
+  NOT fix it; the path fix does.
+
+### Local-only (NEVER a PR)
+- `sources/main.cpp` — app name "QElectroTech-Qt6" (SingleApplication conflict
+  avoidance vs a parallel Qt5 build). Recover from fork, keep unstaged forever.
+
+### After recovering Set A + B
+- Re-run the canonical `cmake ..` configure (re-runs configure => bakes the new
+  path -D definitions) then build.
+- PREFER reconfigure WITHOUT wiping: `rm -rf build_qt6/*` is usually NOT needed
+  and it (a) forces a slow KF6-from-source rebuild and (b) DESTROYS the
+  build_qt6/ symlinks (see Dev build setup). On 2026-06-14, reconfigure-only
+  picked up the path changes and ran correctly without a wipe.
+- VERIFY in the configure output the paths show e.g.
+  `QET_LANG_PATH lang/ (relative to binary)` — NOT `/usr/local/...`.
+- Once PR #1 (build fixes) is prepared as a clean branch, THAT branch becomes
+  the canonical recovery source instead of cherry-picking individual files.
 
 ## CLAUDE.md management
 This file lives in a separate repo: ~/claude-contexts/qelectrotech/CLAUDE.md
@@ -141,16 +227,19 @@ It is symlinked into the QET project root:
 CLAUDE.md is listed in QET's .gitignore — it is not tracked by the QET repo.
 Backed up via: github.com/hairykiwi/claude-contexts
 
-## Dev build setup (one-time, after clean reconfigure)
-Symlink source resource directories into the build dir so QET finds
-them when run from `build_qt6/`:
-  cd ~/qelectrotech/build_qt6
-  ln -s ../elements elements
-  ln -s ../titleblocks titleblocks
-  ln -s ../lang lang
-
-These symlinks are covered by .gitignore (build_qt6/) and must be
-recreated after `rm -rf build_qt6/*`.
+## Dev build setup (after a clean reconfigure / wipe)
+Set B (cmake path fix) makes a Debug build look for `elements/`,
+`titleblocks/`, `lang/` NEXT TO THE BINARY (i.e. inside build_qt6/). Satisfy
+that:
+- `lang/` is GENERATED into build_qt6/lang/ by the build (the .qm files) —
+  no action needed.
+- `elements/` and `titleblocks/` are source data dirs — symlink them in:
+    cd ~/qelectrotech/build_qt6
+    ln -s ../elements elements
+    ln -s ../titleblocks titleblocks
+These symlinks are covered by .gitignore (build_qt6/) and MUST be recreated
+after `rm -rf build_qt6/*` — which is the main reason to AVOID wiping when a
+plain reconfigure will do.
 
 ## macOS development quirks
 - After sleep/wake or reboot required: QET may refuse to launch due to
@@ -166,6 +255,18 @@ recreated after `rm -rf build_qt6/*`.
   or the build will fail with duplicate target errors
 - zsh: use heredoc (git commit -F - << 'EOF') for commit messages
   containing ! characters to avoid zsh history expansion errors
+- QSettings domain for this build is `org.qelectrotech.QElectroTech-Qt6`
+  (because of the main.cpp app-name hack), NOT `qelectrotech`. Matters for
+  `defaults read/write org.qelectrotech.QElectroTech-Qt6 <key>`.
+
+## Known harmless runtime messages (running uninstalled from build tree)
+Do not re-investigate these — known, non-blocking:
+- `failed to load qet_en ".../Resources/lang/"` — only fires if Set B path fix
+  is absent OR a requested lang .qm is missing; with Set B present and English
+  set, UI is English. Fallback to English source strings is harmless.
+- `QObject::connect: No such signal QSignalMapper::mapped(QWidget *)` (x2,
+  qetapp.cpp:122, qetdiagrameditor.cpp:100) — Qt6 removed mapped(); connect
+  fails gracefully. Latent port gap, candidate for a future fix. Non-blocking.
 
 ## Fixes already committed
 See git log for full details:
@@ -174,12 +275,23 @@ To get the current count: git rev-list --count upstream/qt6_cmake_joshua..HEAD
 Known remaining issues are listed below — keep in sync with commits.
 
 ## Known remaining issues (not yet fixed)
-- Grouped dynamic text (ElementTextItemGroup) in a ROTATED element diverges
-  under folio mirror/flip — same signature as the original rotated-text bug
-  fixed in c6344261f, but at the group's nested transform level. Ungrouped
-  text and grouped text in an unrotated element are correct. Separate
-  nested-transform defect in `Element::applyMirrorFlip()`
-  (`sources/qetgraphicsitem/element.cpp`) — to be addressed in a follow-up
+- ACTIVE FIX IN PROGRESS — Grouped rotated text rotation/transform defects.
+  Two related findings (see CC-TASKS.md for full diagnostic detail):
+    * Finding 1 (pre-existing, NOT this feature's bug; confirmed reproducible
+      on STOCK Qt5): grouped text rotates about its LOCAL ORIGIN (0,0) — the
+      first-char lower-left corner of line 1 — instead of boundingRect().center(),
+      because nothing calls setTransformOriginPoint(). Root cause in
+      `elementtextitemgroup.cpp` updateAlignment() (~184-261). At 180° the block
+      orbits that corner to a displaced spot; at odd 90° steps from saved
+      orientation the lines overlap (even steps OK — a parity effect). Saving
+      re-baselines the reference orientation (good/bad angles swap). Qt5
+      repaints correctly on SAVE alone; Qt6 needs save+REOPEN (separate repaint/
+      invalidation staleness layered on top). Affects PDF preview/output too,
+      but only until saved+reopened — saved data is always correct.
+    * Finding 2 (this feature): mirror/flip of grouped rotated text at element
+      rotation 90/270 is incorrect (non-mirror/non-flip move, wrong side,
+      overlap); 180° close-but-not-exact; 0° fine. Saved+reopened always
+      correct. May largely dissolve once Finding 1's pivot bug is fixed.
 - `sources/main.cpp`: app name temporarily set to "QElectroTech-Qt6"
   to avoid SingleApplication conflict with Qt5 build — revert before PR
 - .understand-anything/ knowledge graph committed to branch (bfc312780) —
@@ -207,15 +319,21 @@ Known remaining issues are listed below — keep in sync with commits.
 - Upstream: github.com/qelectrotech/qelectrotech-source-mirror
 - Key upstream contacts: scorpio810 (Laurent, project manager),
   Joshua-cla (Qt6 branch author)
-- PR target: upstream/qt6_cmake_joshua
+- PR target: master for version-agnostic fixes (Laurent's request);
+  qt6_cmake_joshua for Qt6-era feature work. Confirm per-PR.
 - Commit style: short summary line, blank line, bullet detail
+- Folio mirror/flip feature posted to forum (Code section, pid 23010);
+  Laurent invited merge to master (pid 23013). Credits plc-user's
+  Element-Editor rotate/flip/mirror (0.100-dev) + QET_ElementScaler (2022)
+  as the element-definition-level predecessor to this folio-level work.
 
-## Qt6 migration notes
+## Qt6 migration notes (patterns; several already applied — see recovery recipe)
 - qAsConst() → std::as_const() (warnings, not errors)
-- QWheelEvent::delta() → angleDelta().y()
-- qHash seed: uint → size_t
+- QWheelEvent::delta() → angleDelta().y()   [applied: projectview.h]
+- qHash seed: uint → size_t                 [applied: terminalstripmodel.h]
 - QSignalMapper::mapped(T) → mappedInt / mappedObject / mappedString
-- Brace-initialised int from qsizetype → static_cast<int>()
+- Brace-initialised int from qsizetype → static_cast<int>()  [applied:
+  terminalstrip.cpp, elementscene.cpp]
 - SQLite: QSqlDatabase::exec() deprecated → use QSqlQuery::exec()
 - QFont weight: Qt6 requires 1–1000 (Qt5 serialised Thin as 0, which Qt6
   rejects). Remap font weight <1 → Thin (100) at load via
