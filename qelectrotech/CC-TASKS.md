@@ -31,32 +31,46 @@ data is correct.
   group's already-correct internal layout. A `rotationChanged → updateAlignment`
   connection was tried: it FIRES on live rotate but does NOT fix the render.
   Confirmed inert; reverted.
-- Correct rendering = element rotated about transformOriginPoint (0,0) PLUS a
-  pos COMPENSATION. Evidence: `Element::fromXml` reconstruction sets element
-  pos by rotation — 0°→(370,320), 180°→(850,350) — while transformOriginPoint
-  stays (0,0) and boundingRect is constant (-60,-105 120x210). The reconstructed
-  (saved+reloaded) render is correct because it applies this pos compensation.
-- The LIVE rotate path does NOT apply that compensation. Confirmed: an
-  `Element::itemChange()` hook on `ItemRotationHasChanged` was added and dumped —
-  it NEVER FIRES on live interactive rotate (zero dumps during rotation, while
-  the group's updateAlignment fired normally). So the element's itemChange
-  rotation-notification path is not reached on the live rotate.
-- Suspected cause: element likely lacks `QGraphicsItem::ItemSendsGeometryChanges`
-  flag (gates itemChange transform/rotation callbacks), OR QET's rotate applies
-  rotation via a path that bypasses the flagged itemChange. The `rotationChanged`
-  SIGNAL fires (group connection proved it) but `itemChange(ItemRotationHasChanged)`
-  does not — that divergence is the thread to pull.
+- CORRECTION (supersedes an earlier wrong reading): `Element::fromXml` does NOT
+  compute any pos-compensation. It simply calls `QGraphicsObject::setPos(saved_x,
+  saved_y)` then `setRotation(90*saved_orientation)` [element.cpp:769-781] — it
+  restores the literal saved x,y + orientation, no rotation-derived math. The
+  earlier-observed pos difference (0°→(370,320) vs 180°→(850,350)) was just
+  DIFFERENT SAVED x,y in two different .qet files, NOT a reconstruction
+  calculation. So the divergence is NOT in the load path.
+- Therefore the real question is in the SAVE/ROTATE path: reload of a saved file
+  renders correctly, so the saved x,y + orientation ARE correct — meaning
+  something sets the element's correct pos between the live rotate and the save,
+  OR the data was always correct and only the live VIEW is stale (repaint issue).
+  transformOriginPoint stays (0,0) and boundingRect is constant (-60,-105 120x210)
+  throughout — confirmed.
+- Still valid: the LIVE rotate path's `Element::itemChange(ItemRotationHasChanged)`
+  hook NEVER FIRES on interactive rotate (zero dumps), while the group's
+  updateAlignment fires normally via the rotationChanged SIGNAL. So itemChange's
+  rotation-notification path isn't reached live — likely missing
+  ItemSendsGeometryChanges flag, OR rotate bypasses the flagged itemChange.
 
-**Fix direction (next session):**
-Make live element rotation apply the same pos-compensation that `Element::fromXml`
-applies. Two candidate routes:
-  (a) enable ItemSendsGeometryChanges so itemChange(ItemRotationHasChanged) fires
-      live, then apply the compensation there; OR
-  (b) hook the element's existing `rotationChanged` signal at the ELEMENT level
-      (not the group) to recompute/compensate pos on rotate.
-First read how fromXml computes the rotated pos (element.cpp:848 region, the
-reconstruction dump source) — that IS the compensation math to mirror onto the
-live path. Verify against the dumped values (180° → pos (850,350)).
+**Fix direction (next diagnostic — let data decide, do NOT assume):**
+Dump element pos()/rotation() at THREE moments for a 0°→180° live rotate + save:
+  1. POST-ROTATE (after rotation applied in the rotate path) — render is stale here
+  2. AT-SAVE (in Element::toXml, where it reads pos/orientation to write) + the
+     x,y actually written
+  3. compare.
+Key question: does pos() CHANGE between post-rotate (stale) and at-save (correct)?
+  - YES → something corrects pos pre-save; find and apply it live (layer-1 fix =
+    set the corrected pos on rotate so the live render lands the block correctly).
+  - NO (pos identical + already correct at both) → data is correct live, the VIEW
+    just isn't repainting it → pure repaint/invalidation fix.
+LAYER-1 SCOPE = position only: make the live render land the text BLOCK in the
+correct LOCATION on rotate (matching post-save position), no save needed.
+Upside-down text at 180° is the ACCEPTED layer-1 endpoint. Readability is layer 2.
+
+**LAYER 2 (separate, AFTER layer 1 — see also memory note):** per-text de-rotation
+about each text's own bbox centre, for ALL text (grouped/ungrouped dynamic AND
+simple), so it reads correctly. Independent of mirror/flip (its own readability
+logic). Standard (researched): text reads from BOTTOM or RIGHT, never inverted
+(AutoCAD TORIENT / NASA GSFC / ISO); vertical = read-from-RIGHT. 90° case is the
+likely current defect. QET rotation is 90° steps only, so cardinal cases only.
 
 **Severity:** low — display-only, save+reload corrects it; data always sound.
 **Relation:** this is the root of Finding 1 (pre-existing rotation bug, confirmed

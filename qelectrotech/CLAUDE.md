@@ -1,6 +1,12 @@
 # QElectroTech — Claude Code Context
 
 ## Claude Code instructions
+- AT SESSION START: also read `CC-TASKS.md` (same dir as this file, reached via
+  the repo-root symlink) — specifically its ACTIVE section — for in-flight work,
+  diagnostic narratives, and parked tasks. CLAUDE.md holds durable project/build
+  rules; CC-TASKS.md holds what's currently in flight. (Read ACTIVE on startup;
+  the ARCHIVE and FEATURE IDEAS sections only when a task calls for them, to keep
+  startup context lean.)
 - Before committing, show BOTH the proposed commit message AND the staged
   file list (`git status --short`) for review, and WAIT for explicit
   approval. Do not self-approve with "diff looks right" and commit in the
