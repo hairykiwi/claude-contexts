@@ -11,6 +11,16 @@
   never swept into a commit. NOTE: the working tree normally carries SEVERAL
   uncommitted local build-enablers (see "macOS dev build — recovery recipe"),
   not just main.cpp — so `git add <named files>` discipline matters more than ever.
+- Pre-commit staging check (run before EVERY commit): `git status` and confirm
+  the "Changes to be committed" list contains ONLY the named files this commit
+  is meant to include. The working tree permanently carries local build-enablers
+  (main.cpp, CMakeLists.txt, cmake/define_definitions.cmake,
+  cmake/paths_compilation_installation.cmake, cmake/fetch_kdeaddons.cmake, and the
+  TerminalStrip/elementscene/projectview Qt6 fixes) that must NEVER be staged onto
+  a feature/fix branch. If any appears under "Changes to be committed" that isn't
+  part of this specific fix, `git restore --staged <file>` it before committing.
+  WATCH: recovery checkouts (`git checkout <ref> -- <file>`) AUTO-STAGE the files
+  they restore — the most common way build-enablers silently end up in the index.
 - Source code change workflow — full sequence for every source code change,
   from edit through push:
     1. Edit source
