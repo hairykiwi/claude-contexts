@@ -25,45 +25,59 @@ orientation and future-fix insight. Don't duplicate diffs here; do keep reasonin
 overlap. Save→reload ALWAYS renders correctly. So this is DISPLAY-ONLY; saved
 data is correct.
 
-**Diagnosis (this session, confirmed by instrumentation — do NOT re-derive):**
-- The text GROUP is a passive, correctly-positioned child at constant element-
-  local pos (-12,151). updateAlignment() is NOT the bug site — it recomputes the
-  group's already-correct internal layout. A `rotationChanged → updateAlignment`
-  connection was tried: it FIRES on live rotate but does NOT fix the render.
-  Confirmed inert; reverted.
-- CORRECTION (supersedes an earlier wrong reading): `Element::fromXml` does NOT
-  compute any pos-compensation. It simply calls `QGraphicsObject::setPos(saved_x,
-  saved_y)` then `setRotation(90*saved_orientation)` [element.cpp:769-781] — it
-  restores the literal saved x,y + orientation, no rotation-derived math. The
-  earlier-observed pos difference (0°→(370,320) vs 180°→(850,350)) was just
-  DIFFERENT SAVED x,y in two different .qet files, NOT a reconstruction
-  calculation. So the divergence is NOT in the load path.
-- Therefore the real question is in the SAVE/ROTATE path: reload of a saved file
-  renders correctly, so the saved x,y + orientation ARE correct — meaning
-  something sets the element's correct pos between the live rotate and the save,
-  OR the data was always correct and only the live VIEW is stale (repaint issue).
-  transformOriginPoint stays (0,0) and boundingRect is constant (-60,-105 120x210)
-  throughout — confirmed.
-- Still valid: the LIVE rotate path's `Element::itemChange(ItemRotationHasChanged)`
-  hook NEVER FIRES on interactive rotate (zero dumps), while the group's
-  updateAlignment fires normally via the rotationChanged SIGNAL. So itemChange's
-  rotation-notification path isn't reached live — likely missing
-  ItemSendsGeometryChanges flag, OR rotate bypasses the flagged itemChange.
+**Diagnosis (instrumented across 4 eliminated hypotheses — do NOT re-derive):**
+- The text GROUP rotation is always 0; all rotation is on the parent Element.
+  Group sits at constant element-local pos (0,140 in latest test; was -12,151 in
+  an earlier element). transformOriginPoint stays (0,0); boundingRect constant.
+- `Element::fromXml` does NOT compute pos-compensation — it restores literal
+  saved x,y + setRotation(90*orientation) [element.cpp:769-781]. Earlier 0°/180°
+  pos differences were just different saved x,y in different files. NOT load-path.
+- THREE-MOMENT element dump: element pos() IDENTICAL post-rotate and at-save
+  (e.g. (440,310) rot 180 both), toXml writes exactly that. So the ELEMENT's
+  data is already correct live — no pre-save correction happens.
+- FOUR FIX ATTEMPTS, all FAILED, each eliminating a hypothesis with data:
+  1. setTransformOriginPoint(bbox.center()) in updateAlignment — no-op (group's
+     own rotation always 0).
+  2. connect(parent rotationChanged → updateAlignment) — FIRES live but render
+     unchanged.
+  3. element->update() (element-level repaint) — child group's cached render not
+     invalidated; no change.
+  4. group-level prepareGeometryChange()+update() — no change.
+- DECISIVE experiment (force updateAlignment UNBLOCKED on live rotate via the
+  m_block_alignment_update setter, called from RotateSelectionCommand::redo):
+  updateAlignment now runs blocked:false to EXIT on live rotate, BUT produces a
+  DIFFERENT group scene position than reload: live mapToScene (540,160) vs
+  reload (500,150) — ~ (40,10) off. So updateAlignment is NOT idempotent under
+  parent rotation: running it with the element already at 180° gives a different
+  answer than reload's build-then-rotate order. Forcing the relayout does not
+  reproduce reload's result.
+- CONCLUSION: the correct render comes specifically from reload's `addToGroup`
+  reparent-SEQUENCE (fromXml → Element::addTextToGroup → ElementTextItemGroup::
+  addToGroup: sets text rotation to group, Qt-reparents preserving scene pos,
+  THEN relayout) — element.cpp:1188 / elementtextitemgroup.cpp:71. updateAlignment
+  ALONE does not reproduce this. The live rotate path never re-runs the
+  add-sequence, and the alignment relayout is non-idempotent under rotation.
 
-**Fix direction (next diagnostic — let data decide, do NOT assume):**
-Dump element pos()/rotation() at THREE moments for a 0°→180° live rotate + save:
-  1. POST-ROTATE (after rotation applied in the rotate path) — render is stale here
-  2. AT-SAVE (in Element::toXml, where it reads pos/orientation to write) + the
-     x,y actually written
-  3. compare.
-Key question: does pos() CHANGE between post-rotate (stale) and at-save (correct)?
-  - YES → something corrects pos pre-save; find and apply it live (layer-1 fix =
-    set the corrected pos on rotate so the live render lands the block correctly).
-  - NO (pos identical + already correct at both) → data is correct live, the VIEW
-    just isn't repainting it → pure repaint/invalidation fix.
-LAYER-1 SCOPE = position only: make the live render land the text BLOCK in the
-correct LOCATION on rotate (matching post-save position), no save needed.
-Upside-down text at 180° is the ACCEPTED layer-1 endpoint. Readability is layer 2.
+**Fix direction (next session — bigger/delicate, NOT a one-liner):**
+Replicate reload's addToGroup reparent-sequence (or an equivalent that recomputes
+child layout against the new parent rotation the way reload does) on live element
+rotation — NOT a bare updateAlignment call (proven non-idempotent) and NOT a bare
+repaint (proven insufficient). First READ ElementTextItemGroup::addToGroup +
+Element::addTextToGroup + fromXml together to extract the exact ordered sequence
+reload performs, then design the live-rotate equivalent. Verify the live group
+mapToScene matches reload's value (target 500,150 at 180° for the test element),
+not the (540,160) the naive relayout produced.
+LAYER-1 SCOPE = position only: text BLOCK lands in correct LOCATION live on
+rotate (match post-save). Upside-down text at 180° is the ACCEPTED layer-1
+endpoint; readability is layer 2.
+
+**State on disk (IMPORTANT — left by a killed CC session):** experiment-4/decisive
+changes + diagnostic qDebug were NEVER reverted (session was force-quit). A fresh
+CC must FIRST revert: the forced-unblocked updateAlignment loop in
+RotateSelectionCommand::redo(), and ALL diagnostic qDebug (updateAlignment
+ENTER/EXIT, POST-ROTATE GROUP, RELOAD GROUP, element/itemChange dumps) across
+elementtextitemgroup.cpp / element.cpp / rotateselectioncommand.cpp. Confirm
+`git diff` shows only the standing local build-enablers before any new work.
 
 **LAYER 2 (separate, AFTER layer 1 — see also memory note):** per-text de-rotation
 about each text's own bbox centre, for ALL text (grouped/ungrouped dynamic AND
