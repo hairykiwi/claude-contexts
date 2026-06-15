@@ -54,7 +54,7 @@
 - Before preparing any PR to upstream, exclude these fork-only artifacts —
   they belong on the fork, not in upstream history:
     - .understand-anything/  (generated knowledge graph, committed in bfc312780)
-    - CLAUDE.md  (already gitignored)
+    - CLAUDE.md and CC-TASKS.md  (gitignored; fork-local context, never upstream)
   bfc312780 already committed the graph, so gitignoring now will NOT
   un-commit it. Cut the PR from a clean branch off the PR-target and
   cherry-pick only the genuine source/build fixes onto it (this also drops
@@ -254,12 +254,18 @@ next to the binary in build_qt6/ instead of the install path.
 - Once PR #1 (build fixes) is prepared as a clean branch, THAT branch becomes
   the canonical recovery source instead of cherry-picking individual files.
 
-## CLAUDE.md management
-This file lives in a separate repo: ~/claude-contexts/qelectrotech/CLAUDE.md
-It is symlinked into the QET project root:
-  ln -s ~/claude-contexts/qelectrotech/CLAUDE.md ~/qelectrotech/CLAUDE.md
-CLAUDE.md is listed in QET's .gitignore — it is not tracked by the QET repo.
-Backed up via: github.com/hairykiwi/claude-contexts
+## Context files (CLAUDE.md + CC-TASKS.md) management
+Both files live in a separate repo: ~/claude-contexts/qelectrotech/
+They are symlinked into the QET project root so CC reads them in-place:
+  ln -s ~/claude-contexts/qelectrotech/CLAUDE.md   ~/qelectrotech/CLAUDE.md
+  ln -s ~/claude-contexts/qelectrotech/CC-TASKS.md ~/qelectrotech/CC-TASKS.md
+Both are now explicitly listed in QET's .gitignore (CLAUDE.md, CC-TASKS.md) so
+they cannot be accidentally committed into the QET source repo. (HISTORICAL NOTE:
+before 2026-06-15 neither was actually gitignored despite a prior claim here —
+they were kept out of commits only by `git add <named files>` discipline; now the
+.gitignore protection is real, verified via `git check-ignore -v`.) The symlinks
+are per-clone (not committed) — recreate BOTH after any fresh clone of the QET
+repo. Backed up via: github.com/hairykiwi/claude-contexts
 
 ## Dev build setup (after a clean reconfigure / wipe)
 Set B (cmake path fix) makes a Debug build look for `elements/`,
