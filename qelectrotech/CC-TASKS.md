@@ -65,27 +65,46 @@ data is correct.
   (own) = 360 → text renders RIGHT-WAY-UP but displaced. This is EXACTLY the
   "readable but mislocated" symptom. Reload avoids it because m_block_alignment_update
   is true during fromXml's addTextToGroup loop, suppressing the rotation-sync.
-- FIX SPEC (precise): on live element rotation, child texts' OWN rotation must
-  STAY at design value (0), NOT be slaved to the element/group rotation — the
-  parent transform already provides the visual rotation; the text adding its own
-  rotation is the double-count bug. NOTE: the exact line that writes text->setRotation
-  to follow on the LIVE rotate path was NOT yet pinned (removeFromGroup:120 and
-  addToGroup:77 both do `item->setRotation(this->rotation())` but neither is the
-  live-rotate trigger; candidates remain the rotationChanged connections
-  elementtextitemgroup.cpp:307 / emit at :577,:869). NEXT: trace that exact write.
+- ROOT CAUSE FOUND & CONFIRMED (2026-06-15). The text's own rotation is driven by
+  `DynamicElementTextItem::parentElementRotationChanged()`
+  (dynamicelementtextitem.cpp:1302), connected at :1506 to `Element::rotationChanged`:
+      if (m_parent_element && m_keep_visual_rotation)
+          setRotation(QET::correctAngle(m_visual_rotation_ref - m_parent_element->rotation(), true));
+  On every element rotation, each text with m_keep_visual_rotation==true
+  COUNTER-ROTATES to hold its visual orientation (element 90°→text 270, 180°→180 —
+  matches the dump 0→270→180). This is the "keep visual rotation" READABILITY
+  feature; it works as designed for UNGROUPED text (hence ungrouped text is
+  "readable irrespective of save"). For GROUPED text it fires when it shouldn't:
+  the counter-rotation double-counts against the element parent-transform →
+  readable-but-displaced. RELOAD bypasses it (no rotation *change* event during
+  load; element built already-rotated; texts restored at design rotation 0).
+- NOT the cause (ruled out by the selection probe): RotateSelectionCommand. The
+  probe showed only the ELEMENT is selected (selectedItems count 1); group + texts
+  are NOT selected and NOT in selectedItems, so the rotate command's per-item loop
+  never touches them. The guards there are irrelevant to grouped text.
+- This is the seam between LAYER 1 and LAYER 2: m_keep_visual_rotation IS a
+  readability mechanism (layer-2 territory) but it is firing during layer-1 rotation
+  for grouped text, producing the positional bug. Layer-1 fix = stop grouped text
+  counter-rotating on element rotation (rotate WITH the element, upside-down at 180°
+  accepted). Layer 2 later replaces naive keep-visual with the correct drafting
+  convention (read from bottom/right, per memory note).
 
-**Fix direction (next step — trace then fix):**
-1. TRACE the exact line/signal that sets each text's own rotation to follow the
-   element on the LIVE rotate path (not removeFromGroup, not the blocked addToGroup).
-   Likely a rotationChanged→sync connection on the group or text. Confirm by
-   instrumenting setRotation on the text or watching the connection fire on rotate.
-2. FIX: suppress/avoid that own-rotation drive on live element rotation so texts
-   keep design rotation 0 (matching reload). The parent transform supplies the
-   visual rotation. Must NOT regress reload, mirror/flip (feature branch), or the
-   element-editor rotation behaviour.
-3. VERIFY: single-run per-text dump — live rotate texts' own rotation must read 0
-   (like reload), positions unchanged. Visual: text upside-down + correctly located
-   live at 180° (the accepted layer-1 endpoint), no save needed.
+**Fix direction (scoping — touches a deliberate feature flag, design with care):**
+Suppress the parentElementRotationChanged counter-rotation FOR GROUPED TEXT only,
+so grouped text rotates with the element (design rotation preserved, matching
+reload). Candidate approaches to evaluate (CC to assess least-risk):
+  (a) in parentElementRotationChanged(), skip the counter-rotation when the text is
+      in a group (parentItem() is an ElementTextItemGroup) — most surgical;
+  (b) ensure m_keep_visual_rotation is false while a text is grouped (set on
+      add-to-group / cleared on remove) — changes flag state, broader blast radius;
+  (c) gate at the connection (don't connect parentElementRotationChanged while
+      grouped) — must handle group/ungroup transitions.
+Prefer (a) unless it breaks group-level keep-visual expectations. MUST NOT regress:
+ungrouped-text readability (the working case), the mirror/flip feature (folio-
+mirror-flip branch — it relies on keep_visual semantics; check interaction), the
+element-editor, or save/reload. VERIFY via single-run per-text dump: after fix,
+grouped texts' own rotation reads 0 live (like reload), positions unchanged, text
+renders upside-down + correctly located live at 180° with no save.
 LAYER-1 SCOPE = position/orientation parity with reload; readability is layer 2.
 
 **State on disk:** tree was REVERTED CLEAN (2026-06-15) after the killed-session
