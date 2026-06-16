@@ -43,41 +43,57 @@ data is correct.
   3. element->update() (element-level repaint) — child group's cached render not
      invalidated; no change.
   4. group-level prepareGeometryChange()+update() — no change.
-- DECISIVE experiment (force updateAlignment UNBLOCKED on live rotate via the
-  m_block_alignment_update setter, called from RotateSelectionCommand::redo):
-  updateAlignment now runs blocked:false to EXIT on live rotate, BUT produces a
-  DIFFERENT group scene position than reload: live mapToScene (540,160) vs
-  reload (500,150) — ~ (40,10) off. So updateAlignment is NOT idempotent under
-  parent rotation: running it with the element already at 180° gives a different
-  answer than reload's build-then-rotate order. Forcing the relayout does not
-  reproduce reload's result.
-- CONCLUSION: the correct render comes specifically from reload's `addToGroup`
-  reparent-SEQUENCE (fromXml → Element::addTextToGroup → ElementTextItemGroup::
-  addToGroup: sets text rotation to group, Qt-reparents preserving scene pos,
-  THEN relayout) — element.cpp:1188 / elementtextitemgroup.cpp:71. updateAlignment
-  ALONE does not reproduce this. The live rotate path never re-runs the
-  add-sequence, and the alignment relayout is non-idempotent under rotation.
+- RETRACTED earlier claim: an experiment forcing updateAlignment unblocked on
+  live rotate was read as giving group mapToScene (540,160) vs reload (500,150),
+  "non-idempotent, off by (40,10)". That comparison was INVALID — the two numbers
+  came from two different runs with different manual element placements (~40px
+  apart). Disregard the (40,10) / non-idempotence conclusion.
+- DECISIVE single-run per-text dump (2026-06-15, valid: same placement, both
+  moments). Dumped element+group+each text pos/rotation/transform/mapToScene at
+  (A) live rotate to 180° and (B) save→reload, SAME element. Result:
+  * ELEMENT identical (A)=(B): pos (620,280), rot 180, sceneTransform [-1,0,0,-1].
+  * GROUP identical (A)=(B): pos (-23,185), rot 0, mapToScene (643,95),
+    mapRectToScene (557,76 86x43).
+  * TEXT positions identical (A)=(B): mapToScene (643,95)/(643,107)/(643,119).
+  * THE ONLY DIFFERENCE = each text's OWN rotation: (A) live = 180, (B) reload = 0.
+  * All transform matrices were [1,0,0,1] (no mirror) — so it is NOT a flip; it is
+    a pure rotation double-count.
+- MECHANISM (now unambiguous): on reload each text keeps its design rotation 0;
+  the element's 180° parent transform supplies the visual rotation → text renders
+  upside-down, correctly located (CORRECT, the layer-1 endpoint). On live rotate
+  each text's OWN rotation is ALSO driven to 180 → element 180 (parent) + text 180
+  (own) = 360 → text renders RIGHT-WAY-UP but displaced. This is EXACTLY the
+  "readable but mislocated" symptom. Reload avoids it because m_block_alignment_update
+  is true during fromXml's addTextToGroup loop, suppressing the rotation-sync.
+- FIX SPEC (precise): on live element rotation, child texts' OWN rotation must
+  STAY at design value (0), NOT be slaved to the element/group rotation — the
+  parent transform already provides the visual rotation; the text adding its own
+  rotation is the double-count bug. NOTE: the exact line that writes text->setRotation
+  to follow on the LIVE rotate path was NOT yet pinned (removeFromGroup:120 and
+  addToGroup:77 both do `item->setRotation(this->rotation())` but neither is the
+  live-rotate trigger; candidates remain the rotationChanged connections
+  elementtextitemgroup.cpp:307 / emit at :577,:869). NEXT: trace that exact write.
 
-**Fix direction (next session — bigger/delicate, NOT a one-liner):**
-Replicate reload's addToGroup reparent-sequence (or an equivalent that recomputes
-child layout against the new parent rotation the way reload does) on live element
-rotation — NOT a bare updateAlignment call (proven non-idempotent) and NOT a bare
-repaint (proven insufficient). First READ ElementTextItemGroup::addToGroup +
-Element::addTextToGroup + fromXml together to extract the exact ordered sequence
-reload performs, then design the live-rotate equivalent. Verify the live group
-mapToScene matches reload's value (target 500,150 at 180° for the test element),
-not the (540,160) the naive relayout produced.
-LAYER-1 SCOPE = position only: text BLOCK lands in correct LOCATION live on
-rotate (match post-save). Upside-down text at 180° is the ACCEPTED layer-1
-endpoint; readability is layer 2.
+**Fix direction (next step — trace then fix):**
+1. TRACE the exact line/signal that sets each text's own rotation to follow the
+   element on the LIVE rotate path (not removeFromGroup, not the blocked addToGroup).
+   Likely a rotationChanged→sync connection on the group or text. Confirm by
+   instrumenting setRotation on the text or watching the connection fire on rotate.
+2. FIX: suppress/avoid that own-rotation drive on live element rotation so texts
+   keep design rotation 0 (matching reload). The parent transform supplies the
+   visual rotation. Must NOT regress reload, mirror/flip (feature branch), or the
+   element-editor rotation behaviour.
+3. VERIFY: single-run per-text dump — live rotate texts' own rotation must read 0
+   (like reload), positions unchanged. Visual: text upside-down + correctly located
+   live at 180° (the accepted layer-1 endpoint), no save needed.
+LAYER-1 SCOPE = position/orientation parity with reload; readability is layer 2.
 
-**State on disk (IMPORTANT — left by a killed CC session):** experiment-4/decisive
-changes + diagnostic qDebug were NEVER reverted (session was force-quit). A fresh
-CC must FIRST revert: the forced-unblocked updateAlignment loop in
-RotateSelectionCommand::redo(), and ALL diagnostic qDebug (updateAlignment
-ENTER/EXIT, POST-ROTATE GROUP, RELOAD GROUP, element/itemChange dumps) across
-elementtextitemgroup.cpp / element.cpp / rotateselectioncommand.cpp. Confirm
-`git diff` shows only the standing local build-enablers before any new work.
+**State on disk:** tree was REVERTED CLEAN (2026-06-15) after the killed-session
+diagnostics — CC confirmed `git diff` shows only the standing local build-enablers,
+no changes to the three source-fix files. The per-text dump above used temporary
+read-only instrumentation that was also reverted. Start the fix from this clean
+tree. (If any diagnostic qDebug or the dumpGroupTransforms helper reappears in a
+diff, strip it before committing.)
 
 **LAYER 2 (separate, AFTER layer 1 — see also memory note):** per-text de-rotation
 about each text's own bbox centre, for ALL text (grouped/ungrouped dynamic AND
