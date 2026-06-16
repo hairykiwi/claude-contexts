@@ -16,117 +16,6 @@ orientation and future-fix insight. Don't duplicate diffs here; do keep reasonin
 
 ## ACTIVE
 
-### Grouped/element rotated text displaced on LIVE rotate (display-only)  · OPEN (diagnosed, fix parked)
-**Area:** element rotation render · **Branch:** fix-grouped-text-rotation-pivot
-**Location:** `Element` rotation path / `element.cpp` (NOT elementtextitemgroup.cpp)
-
-**Symptom:** When a placed element is rotated live (interactive rotate), grouped
-(and ungrouped) text displaces — orbits to a wrong position; at 90°/270° lines
-overlap. Save→reload ALWAYS renders correctly. So this is DISPLAY-ONLY; saved
-data is correct.
-
-**Diagnosis (instrumented across 4 eliminated hypotheses — do NOT re-derive):**
-- The text GROUP rotation is always 0; all rotation is on the parent Element.
-  Group sits at constant element-local pos (0,140 in latest test; was -12,151 in
-  an earlier element). transformOriginPoint stays (0,0); boundingRect constant.
-- `Element::fromXml` does NOT compute pos-compensation — it restores literal
-  saved x,y + setRotation(90*orientation) [element.cpp:769-781]. Earlier 0°/180°
-  pos differences were just different saved x,y in different files. NOT load-path.
-- THREE-MOMENT element dump: element pos() IDENTICAL post-rotate and at-save
-  (e.g. (440,310) rot 180 both), toXml writes exactly that. So the ELEMENT's
-  data is already correct live — no pre-save correction happens.
-- FOUR FIX ATTEMPTS, all FAILED, each eliminating a hypothesis with data:
-  1. setTransformOriginPoint(bbox.center()) in updateAlignment — no-op (group's
-     own rotation always 0).
-  2. connect(parent rotationChanged → updateAlignment) — FIRES live but render
-     unchanged.
-  3. element->update() (element-level repaint) — child group's cached render not
-     invalidated; no change.
-  4. group-level prepareGeometryChange()+update() — no change.
-- RETRACTED earlier claim: an experiment forcing updateAlignment unblocked on
-  live rotate was read as giving group mapToScene (540,160) vs reload (500,150),
-  "non-idempotent, off by (40,10)". That comparison was INVALID — the two numbers
-  came from two different runs with different manual element placements (~40px
-  apart). Disregard the (40,10) / non-idempotence conclusion.
-- DECISIVE single-run per-text dump (2026-06-15, valid: same placement, both
-  moments). Dumped element+group+each text pos/rotation/transform/mapToScene at
-  (A) live rotate to 180° and (B) save→reload, SAME element. Result:
-  * ELEMENT identical (A)=(B): pos (620,280), rot 180, sceneTransform [-1,0,0,-1].
-  * GROUP identical (A)=(B): pos (-23,185), rot 0, mapToScene (643,95),
-    mapRectToScene (557,76 86x43).
-  * TEXT positions identical (A)=(B): mapToScene (643,95)/(643,107)/(643,119).
-  * THE ONLY DIFFERENCE = each text's OWN rotation: (A) live = 180, (B) reload = 0.
-  * All transform matrices were [1,0,0,1] (no mirror) — so it is NOT a flip; it is
-    a pure rotation double-count.
-- MECHANISM (now unambiguous): on reload each text keeps its design rotation 0;
-  the element's 180° parent transform supplies the visual rotation → text renders
-  upside-down, correctly located (CORRECT, the layer-1 endpoint). On live rotate
-  each text's OWN rotation is ALSO driven to 180 → element 180 (parent) + text 180
-  (own) = 360 → text renders RIGHT-WAY-UP but displaced. This is EXACTLY the
-  "readable but mislocated" symptom. Reload avoids it because m_block_alignment_update
-  is true during fromXml's addTextToGroup loop, suppressing the rotation-sync.
-- ROOT CAUSE FOUND & CONFIRMED (2026-06-15). The text's own rotation is driven by
-  `DynamicElementTextItem::parentElementRotationChanged()`
-  (dynamicelementtextitem.cpp:1302), connected at :1506 to `Element::rotationChanged`:
-      if (m_parent_element && m_keep_visual_rotation)
-          setRotation(QET::correctAngle(m_visual_rotation_ref - m_parent_element->rotation(), true));
-  On every element rotation, each text with m_keep_visual_rotation==true
-  COUNTER-ROTATES to hold its visual orientation (element 90°→text 270, 180°→180 —
-  matches the dump 0→270→180). This is the "keep visual rotation" READABILITY
-  feature; it works as designed for UNGROUPED text (hence ungrouped text is
-  "readable irrespective of save"). For GROUPED text it fires when it shouldn't:
-  the counter-rotation double-counts against the element parent-transform →
-  readable-but-displaced. RELOAD bypasses it (no rotation *change* event during
-  load; element built already-rotated; texts restored at design rotation 0).
-- NOT the cause (ruled out by the selection probe): RotateSelectionCommand. The
-  probe showed only the ELEMENT is selected (selectedItems count 1); group + texts
-  are NOT selected and NOT in selectedItems, so the rotate command's per-item loop
-  never touches them. The guards there are irrelevant to grouped text.
-- This is the seam between LAYER 1 and LAYER 2: m_keep_visual_rotation IS a
-  readability mechanism (layer-2 territory) but it is firing during layer-1 rotation
-  for grouped text, producing the positional bug. Layer-1 fix = stop grouped text
-  counter-rotating on element rotation (rotate WITH the element, upside-down at 180°
-  accepted). Layer 2 later replaces naive keep-visual with the correct drafting
-  convention (read from bottom/right, per memory note).
-
-**Fix direction (scoping — touches a deliberate feature flag, design with care):**
-Suppress the parentElementRotationChanged counter-rotation FOR GROUPED TEXT only,
-so grouped text rotates with the element (design rotation preserved, matching
-reload). Candidate approaches to evaluate (CC to assess least-risk):
-  (a) in parentElementRotationChanged(), skip the counter-rotation when the text is
-      in a group (parentItem() is an ElementTextItemGroup) — most surgical;
-  (b) ensure m_keep_visual_rotation is false while a text is grouped (set on
-      add-to-group / cleared on remove) — changes flag state, broader blast radius;
-  (c) gate at the connection (don't connect parentElementRotationChanged while
-      grouped) — must handle group/ungroup transitions.
-Prefer (a) unless it breaks group-level keep-visual expectations. MUST NOT regress:
-ungrouped-text readability (the working case), the mirror/flip feature (folio-
-mirror-flip branch — it relies on keep_visual semantics; check interaction), the
-element-editor, or save/reload. VERIFY via single-run per-text dump: after fix,
-grouped texts' own rotation reads 0 live (like reload), positions unchanged, text
-renders upside-down + correctly located live at 180° with no save.
-LAYER-1 SCOPE = position/orientation parity with reload; readability is layer 2.
-
-**State on disk:** tree was REVERTED CLEAN (2026-06-15) after the killed-session
-diagnostics — CC confirmed `git diff` shows only the standing local build-enablers,
-no changes to the three source-fix files. The per-text dump above used temporary
-read-only instrumentation that was also reverted. Start the fix from this clean
-tree. (If any diagnostic qDebug or the dumpGroupTransforms helper reappears in a
-diff, strip it before committing.)
-
-**LAYER 2 (separate, AFTER layer 1 — see also memory note):** per-text de-rotation
-about each text's own bbox centre, for ALL text (grouped/ungrouped dynamic AND
-simple), so it reads correctly. Independent of mirror/flip (its own readability
-logic). Standard (researched): text reads from BOTTOM or RIGHT, never inverted
-(AutoCAD TORIENT / NASA GSFC / ISO); vertical = read-from-RIGHT. 90° case is the
-likely current defect. QET rotation is 90° steps only, so cardinal cases only.
-
-**Severity:** low — display-only, save+reload corrects it; data always sound.
-**Relation:** this is the root of Finding 1 (pre-existing rotation bug, confirmed
-on stock Qt5) AND likely Finding 2 (mirror/flip of rotated grouped text). Fixing
-the element-level live pos-compensation may resolve both. Bug 2 (ungrouped text
-de-rotation/position at 90/270, save doesn't fix) is SEPARATE — own task.
-
 ### Genuine ungroup of a mirrored element displaces text  · DEFERRED
 **Area:** element text groups · **Branch:** folio-mirror-flip
 **Location:** `Element::removeTextFromGroup` → `elementtextitemgroup.cpp:1367`
@@ -188,6 +77,56 @@ as tracked work until confirmed (may be a non-problem).
 ---
 
 ## ARCHIVE — resolved / superseded
+
+### RESOLVED — live-rotate displacement of element text (rigid rotation)
+**Commit:** 843ba6898 · **Branch:** fix-grouped-text-rotation-pivot
+On live element rotation, `DynamicElementTextItem::parentElementRotationChanged`
+(dynamicelementtextitem.cpp:1302, on `Element::rotationChanged`) counter-rotated
+each text (`m_keep_visual_rotation`) to hold its visual orientation. For text
+carried by the element transform this double-counts: text stays readable but is
+displaced, and its own-rotation drifts 180° per save/reload cycle. Reload never
+runs this path, so saved files always reopened correctly — bug was display-only,
+live diverging from reload. Fix: suppress the counter-rotation so ALL element
+text (grouped, ungrouped, single/multi-line) rotates rigidly with the element,
+keeping design own-rotation 0 — matching what reload produces (upside-down but
+correctly placed at 180°). `m_keep_visual_rotation` left intact (still
+serialized/editable) for readability reintroduction. Save path unaffected
+(removeFromGroup resets text rotation before toXml). VERIFIED: double round-trip
+per-text dump, grouped + ungrouped — live own-rot 0 == reload, positions stable
+through 900° (2.5 turns), no drift, live render == reopened-file render.
+First attempt: FAIL×5 → PARTIAL → PASS (see fix-metrics 843ba6898).
+
+<details>
+<summary>Diagnostic playbook — kept for layer-2 reference (the de-rotation/readability follow-on)</summary>
+
+Eliminated, each with data (do NOT re-try as a layer-2 approach without cause):
+1. setTransformOriginPoint(bbox.center()) in updateAlignment — no-op (group's own
+   rotation always 0; all rotation is on the parent Element).
+2. connect(Element::rotationChanged -> updateAlignment) — fires but render unchanged.
+3. element->update() — element repaint does NOT invalidate child group's cached render.
+4. group prepareGeometryChange()+update() — no change.
+5. forced-unblocked updateAlignment on rotate — runs but does NOT reproduce reload.
+6. first parentElementRotationChanged guard (grouped-only) — PARTIAL: fixed position
+   but own-rotation still drifted (live-180 own-rot 180 vs reload 0).
+Decisive method: single-run per-text dump (element+group+each text:
+pos/rotation/transform/mapToScene) at (A) live RotateSelectionCommand::redo and
+(B) reload fromXml, SAME placement. Showed element+group+text POSITIONS identical
+A=B; ONLY difference = each text's own rotation (live 180 vs reload 0); all
+transform matrices [1,0,0,1] (no mirror) -> pure rotation double-count. Selection
+probe ruled out RotateSelectionCommand (only the element is selected; group/texts
+not in selectedItems). Root located at parentElementRotationChanged keep_visual.
+
+LAYER 2 (next, deferred — see memory note): reintroduce readability properly —
+per-text de-rotation about each text's own bbox centre, for ALL text types, with
+correct relative LAYOUT preserved (inter-line spacing + order), not just
+orientation. Current intermediate state: all text upside-down at 180° / vertical
+(rigid), correctly placed. Standard: text reads from BOTTOM or RIGHT, never
+inverted (AutoCAD TORIENT / NASA GSFC / ISO); vertical = read-from-RIGHT; 90° the
+likely classically-mishandled case. Evidence layer-2 must own layout: pre-fix
+ungrouped text stayed readable but lines overlapped at 90/270 and reversed order
+(3,2,1) at 180 — readable-but-mislaid. Mirror/flip (folio-mirror-flip) relies on
+keep_visual semantics — check interaction when building layer 2.
+</details>
 
 ### RESOLVED — grouped rotated text: mirror corrupts on save/reload
 **Commit:** 05bcba506 · **Branch:** folio-mirror-flip
