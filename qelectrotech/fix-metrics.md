@@ -50,3 +50,28 @@ Graph queries: 0
 Tool calls / token cost: not captured
 Scope: save-path serialization for grouped text. Sibling deferred: genuine ungroup
 of a mirrored element (removeFromGroup/1367 path); pre-damaged-file healing.
+
+## 843ba6898 — Fix live-rotate displacement of element text
+First attempt: FAIL→FAIL→FAIL→FAIL→FAIL→PARTIAL→PASS
+Five coded-and-tested fixes that FAILED outright — setTransformOriginPoint;
+rotationChanged->updateAlignment; element->update repaint; group
+prepareGeometryChange+update; forced-unblocked updateAlignment. Then one
+PARTIAL — the first parentElementRotationChanged guard (parentGroup()-only)
+fixed position but left own-rotation drifting. Then PASS — uniform
+counter-rotation suppression for all element text, commit 843ba6898.
+Reached via multi-session diagnosis: eliminated 4 prior hypotheses
+(transformOriginPoint, rotationChanged->updateAlignment, element/group repaint,
+forced-unblocked relayout — all FAILED with data), then a two-moment per-text
+transform dump (A: live redo / B: reload fromXml) plus a selection-state probe
+located the root cause in DynamicElementTextItem::parentElementRotationChanged
+(keep_visual counter-rotation double-counting against the element transform).
+The PASS version cleared two non-regression checks before coding (save path
+resets text rotation in removeFromGroup before toXml; no consumer reads the
+counter-rotated value) and passed the double-round-trip per-text verification
+(grouped + ungrouped): live-180 own-rot = 0 matching reload, positions stable,
+no 180°/cycle drift, live render == reopened-file render.
+Graph queries: 0
+Tool calls / token cost: not captured
+Scope: layer 1 (rigid rotation / correct position) only. Layer 2 (text
+readability de-rotation about own centre) deferred; m_keep_visual_rotation
+kept intact for its reintroduction.

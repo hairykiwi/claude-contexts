@@ -85,6 +85,26 @@ Touch only what the task requires:
 - If your changes make imports/variables/functions unused, remove them.
 - Don't remove pre-existing dead code unless asked — mention it instead.
 
+## Diagnosing hard / confusing bugs (measure, don't hypothesise)
+Hard-won from the rotation-text fix (multi-session, ~6 wrong turns, all from
+guessing ahead of data). When behaviour is confusing or a fix attempt fails:
+- MEASURE before hypothesising. Instrument and dump real values; don't reason
+  from the code alone. Every wrong turn came from a plausible hypothesis that a
+  one-line dump would have killed in minutes.
+- Compare in a SINGLE run under IDENTICAL conditions. A false "off by (40,10)"
+  conclusion came from comparing two runs with different element placements.
+  Capture both states (e.g. live vs reload, before vs after) in one run, same setup.
+- Measure the FULL picture, assume nothing about scope. Dumping element + group +
+  EACH text (pos, rotation, transform matrix, mapToScene) in one shot isolated the
+  variable; narrow measurements hid it (a bbox masked an orientation flip; a
+  group-level value masked per-text divergence). Include the transform matrix —
+  a mirror/flip shows as a sign flip there that pos/rotation alone hide.
+- Side-by-side correct-vs-wrong is the fastest way to see divergence (live vs the
+  known-good reload; grouped vs ungrouped). Let the one quantity that differs name
+  the cause — then fix THAT, not a symptom.
+- After 2-3 failed fixes, STOP coding and go back to measurement. Repeated fix
+  failure means the mental model is wrong, not the patch
+  
 ## Testing requirements
 Before pushing any commit to origin, Claude must propose and the developer
 must perform a brief functional test relevant to the change:
@@ -315,23 +335,17 @@ To get the current count: git rev-list --count upstream/qt6_cmake_joshua..HEAD
 Known remaining issues are listed below — keep in sync with commits.
 
 ## Known remaining issues (not yet fixed)
-- ACTIVE FIX IN PROGRESS — Grouped rotated text rotation/transform defects.
-  Two related findings (see CC-TASKS.md for full diagnostic detail):
-    * Finding 1 (pre-existing, NOT this feature's bug; confirmed reproducible
-      on STOCK Qt5): grouped text rotates about its LOCAL ORIGIN (0,0) — the
-      first-char lower-left corner of line 1 — instead of boundingRect().center(),
-      because nothing calls setTransformOriginPoint(). Root cause in
-      `elementtextitemgroup.cpp` updateAlignment() (~184-261). At 180° the block
-      orbits that corner to a displaced spot; at odd 90° steps from saved
-      orientation the lines overlap (even steps OK — a parity effect). Saving
-      re-baselines the reference orientation (good/bad angles swap). Qt5
-      repaints correctly on SAVE alone; Qt6 needs save+REOPEN (separate repaint/
-      invalidation staleness layered on top). Affects PDF preview/output too,
-      but only until saved+reopened — saved data is always correct.
-    * Finding 2 (this feature): mirror/flip of grouped rotated text at element
-      rotation 90/270 is incorrect (non-mirror/non-flip move, wrong side,
-      overlap); 180° close-but-not-exact; 0° fine. Saved+reopened always
-      correct. May largely dissolve once Finding 1's pivot bug is fixed.
+- Rotated element text readability (LAYER 2, not yet done). LAYER 1 (rigid
+  rotation / correct position) is FIXED — commit 843ba6898: suppressed the
+  parentElementRotationChanged keep-visual counter-rotation for all element
+  text, so text rotates rigidly with the element (upside-down at 180°,
+  correctly placed, matching reload). LAYER 2 remaining: de-rotate text about
+  its own bbox centre so it reads correctly (read from bottom/right, never
+  inverted; 90° steps only) WITHOUT reintroducing the layer-1 double-count.
+  m_keep_visual_rotation kept intact as the hook. See CC-TASKS.md for the full
+  diagnosis (root cause was the counter-rotation double-counting against the
+  element parent-transform; the earlier transformOriginPoint / mirror-flip
+  framing was superseded).
 - `sources/main.cpp`: app name temporarily set to "QElectroTech-Qt6"
   to avoid SingleApplication conflict with Qt5 build — revert before PR
 - .understand-anything/ knowledge graph committed to branch (bfc312780) —
