@@ -16,6 +16,68 @@ orientation and future-fix insight. Don't duplicate diffs here; do keep reasonin
 
 ## ACTIVE
 
+### Rotated-element text readability — LAYER 2 (de-rotation + layout)  · OPEN (fully specced, not yet coded)
+**Area:** element text rotation/readability · **Branch:** mirror-flip-rotate (integration; off qt6_cmake_joshua, clean-merges folio-mirror-flip + cherry-picked layer-1 843ba6898)
+**Depends on:** layer-1 (DONE, 843ba6898 — text rotates rigidly with element; that's the substrate this corrects). See memory note for the standards detail.
+**Related (separate, not a dependency):** shares the ungroup/`removeFromGroup` path with the "Genuine ungroup of a mirrored element displaces text" entry. That one is a mirror-geometry positional bug (persists to disk); this is rotation-orientation display logic. Don't merge them — but whoever codes second must not regress the first in the shared function.
+
+**Goal:** make rotated-element text ISO-conformant by default, with an opt-in
+"force horizontal" override — applied uniformly to grouped, ungrouped, and simple text.
+
+**Observations table (confirmed empirically; R = readable/ISO-correct, I = inverted/wrong; identical for grouped & ungrouped):**
+| TER  | plain | M↮F | M&F |
+|------|-------|-----|-----|
+| 0°   | R     | R   | R   |
+| 90°  | I     | R   | I   |
+| 180° | I     | I   | I   |
+| 270° | R     | I   | R   |
+- M&F (mirror AND flip) == 180° rotation (its column matches plain). M↮F (single
+  reflection, mirror XOR flip) has the offset pattern. So readability must be
+  computed from each text's NET scene transform, not from rotation alone.
+- Confirmed: R@270° = tops-left (ISO-correct vertical, read-from-right); I@90° = inverted.
+
+**MVR switch ("Maintain Visual Rotation", per-text):**
+- ON (opt-in): force text to tops-up horizontal / folio orientation regardless of
+  TER (de-rotate by −TER). The ASME unidirectional "read from bottom" allowance.
+- OFF (DEFAULT): ISO-conformant — for any text whose net orientation is I, apply a
+  180° correction; leave R cases genuinely untouched (true no-op, not "rotate 0").
+  Result: always read-from-bottom or read-from-right, never inverted.
+- Layer-1 (rigid rotation) is the substrate that produces the R/I pattern; OFF then
+  corrects the I's. So default shipping behaviour after layer-2 = ISO-conformant.
+
+**Grouping-dependent pivot (this is what makes LAYOUT come out right, one mechanism):**
+- The I→R 180° correction pivots about the GROUP bbox centre if grouped (whole block
+  rotates coherently → orientation AND line order/spacing self-correct — fixes the
+  "rigid block mislocated" symptom), or about EACH TEXT's own bbox centre if ungrouped
+  (each corrected in place, inter-line spacing preserved — fixes the overlap@90/270 and
+  order-reversal@180 symptoms). Orientation + layout solved by one op; pivot varies by grouping.
+
+**Group/ungroup MVR rule (CHOSEN): adopt-group-value, no dormant state.**
+- Invariant: a text's MVR is always exactly what it currently displays; grouping/
+  ungrouping carries NO hidden history. Group imposes one MVR (coherent block); on
+  ungroup, every text adopts the group's current MVR as its own. Reversal = undo stack,
+  not hidden item state. Chosen because it needs zero new persistent state and structurally
+  cannot produce a displayed-vs-stored divergence (the live-vs-reload bug class we just killed).
+- REJECTED — AND-semantics: group ON only if all members ON else OFF; ungroup keeps it.
+  Lossy + arbitrary collapse rule; no advantage over chosen.
+- REJECTED — dormant/lossless: members retain hidden MVR through grouping, restored on
+  ungroup. Lossless but adds invisible per-member state (extra XML serialization) and can
+  cause visual jumps on ungroup; invisible state is exactly the bug class to avoid.
+
+**Existing setting to PRESERVE (do not disturb):** "Keep at bottom of page" (grouped only)
+— pins group to page bottom (bbox-centre aligned to element centre), keeps text readable,
+makes group non-selectable; on undo it stays drawn but becomes selectable/movable again.
+Works correctly today. Layer-2 must not change it.
+
+**Deferred sub-idea:** rename "Maintain Visual Rotation" → "Match drawing orientation" (or a
+crisp two-word equivalent). Likely EN-lang-file-only. Research KiCad/other-CAD naming first.
+
+**Mechanism note for implementer:** mirror/flip and layer-1 confirmed fully independent
+(clean merge, no conflict — separate code paths). The suppressed
+DynamicElementTextItem::parentElementRotationChanged keep_visual counter-rotation is the
+hook MVR-ON re-uses; MVR-OFF is the new I→R correction. Decide readability from net transform
+per text (determinant + angle), gated by the MVR switch and the grouping-dependent pivot.
+
 ### Genuine ungroup of a mirrored element displaces text  · DEFERRED
 **Area:** element text groups · **Branch:** folio-mirror-flip
 **Location:** `Element::removeTextFromGroup` → `elementtextitemgroup.cpp:1367`
@@ -26,6 +88,7 @@ grouped text ~19px; persists to disk (confirmed via round-trip). Same
 mirror-free frame instead of relying on the scene-preserving detach.
 **Severity:** low — reachable only via Properties → Delete-group; no
 right-click ungroup gesture exists.
+**Related (separate, not a dependency):** shares the ungroup/`removeFromGroup` path with the LAYER 2 readability entry. Distinct concern (this = mirror geometry to disk; that = rotation orientation display). Whoever codes the second of the two must verify it doesn't regress the first in the shared function. (This is the smaller, known-shape fix — cf. 05bcba506 — so it's a low-risk standalone session whenever convenient; no strict ordering required.)
 **Next:** own scoped session; read 1367 path, confirm same-shape vs trickier
 (it touches the shared removeFromGroup that's *correct* for unmirrored ungroup),
 write fix + verification matrix before implementing.
