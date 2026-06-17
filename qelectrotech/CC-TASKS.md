@@ -16,7 +16,8 @@ orientation and future-fix insight. Don't duplicate diffs here; do keep reasonin
 
 ## ACTIVE
 
-### Rotated-element text readability — LAYER 2 (de-rotation + layout)  · OPEN (fully specced, not yet coded)
+### Rotated-element text readability — LAYER 2 (de-rotation + layout)  · IMPLEMENTED & VALIDATED (pending de-instrument + commit)
+**Status (Jun 2026):** classifier gate-1 PASSED (logical-state parity/theta reproduces the 24-cell table); orientation correction built and gates α (layer-1 regression clean), β (no rotation drift; OFF confirmed forward-acting), γ (24-cell orientation+position+save/reload) all PASS. Position fix for the grouped+flip ~group-height displacement committed separately as b0a405329. Remaining: de-instrument, stage real hunks only, commit orientation correction, fix-metrics, push (with b0a405329). See known-quirks block at end of this entry.
 **Area:** element text rotation/readability · **Branch:** mirror-flip-rotate (integration; off qt6_cmake_joshua, clean-merges folio-mirror-flip + cherry-picked layer-1 843ba6898)
 **Depends on:** layer-1 (DONE, 843ba6898 — text rotates rigidly with element; that's the substrate this corrects). See memory note for the standards detail.
 **Related (separate, not a dependency):** shares the ungroup/`removeFromGroup` path with the "Genuine ungroup of a mirrored element displaces text" entry. That one is a mirror-geometry positional bug (persists to disk); this is rotation-orientation display logic. Don't merge them — but whoever codes second must not regress the first in the shared function.
@@ -75,8 +76,35 @@ crisp two-word equivalent). Likely EN-lang-file-only. Research KiCad/other-CAD n
 **Mechanism note for implementer:** mirror/flip and layer-1 confirmed fully independent
 (clean merge, no conflict — separate code paths). The suppressed
 DynamicElementTextItem::parentElementRotationChanged keep_visual counter-rotation is the
-hook MVR-ON re-uses; MVR-OFF is the new I→R correction. Decide readability from net transform
-per text (determinant + angle), gated by the MVR switch and the grouping-dependent pivot.
+hook MVR-ON re-uses; MVR-OFF is the new I→R correction. Decide readability from the text's net
+LOGICAL orientation (see implementation note below), gated by the MVR switch and the grouping-dependent pivot.
+(Implementation note: readability is computed from LOGICAL state — parity = mirror XOR flip,
+theta = snapped sum of rotations — NOT from sceneTransform determinant, because QET mirror/flip
+rewrites positions and leaves the linear matrix [1,0,0,1], det always +1. The apply-architecture
+funnels rotate+mirror+flip through applyMirrorFlip with ordered correct-then-compensate, plus an
+(A′) guard: plain unmirrored rotate short-circuits compensate to protect the layer-1 hot path.)
+
+**Known quirks — INTENDED behaviour, documented, pending community feedback (do NOT file as bugs):**
+1. **MVR=ON on multiple ungrouped text lines overlaps at 90°/270°.** Each ON line is forced to
+   tops-up horizontal about its OWN bbox centre; independent lines have no shared frame, so they
+   collapse onto each other at vertical orientations. KEPT (not restricted to grouped-only) because
+   (a) older .qet files may already use ungrouped MVR=ON and disallowing it could break their
+   layout on open; (b) it's user-recoverable (drag the lines apart) and occasionally useful;
+   (c) affects few users rarely. Stacking is a GROUPED concept — ungrouped text has no ISO
+   "stacking", it's only ISO-conformant by rigid rotation from its authored start.
+2. **MVR ON→OFF carries no history; OFF is forward-acting, not retroactive.** Selecting OFF does
+   NOT undo what ON did — it does not restore a prior orientation/position. OFF's contract is:
+   from this point forward, keep the text ISO-conformant through subsequent M/F/R transforms
+   (flip the I cases, leave R). If ON left text in an unwanted orientation, the user de-rotates it
+   manually ONCE; OFF maintains ISO from there. This is the same stateless principle as
+   "MVR = what's currently displayed, no hidden history". Confirmed by test: set OFF after an ON
+   episode, then rotate 90/180/270 — each subsequent rotation is ISO-correct (PASS).
+
+**Group/ungroup MVR (as-built, LEAVE AS-IS pending community input):** the group exposes no MVR
+control; grouping a mixed set leaves each text's own MVR untouched, and ungroup reverts each text
+to its individual pre-group MVR value (de-facto pass-through, since ElementTextItemGroup has no
+keep-visual concept). The earlier "adopt-group-value / ungroup→all-OFF" idea is NOT adopted —
+keep the pre-existing revert-to-individual behaviour for backward-compat until community feedback.
 
 ### Genuine ungroup of a mirrored element displaces text  · DEFERRED
 **Area:** element text groups · **Branch:** folio-mirror-flip
