@@ -104,6 +104,12 @@ guessing ahead of data). When behaviour is confusing or a fix attempt fails:
   the cause — then fix THAT, not a symptom.
 - After 2-3 failed fixes, STOP coding and go back to measurement. Repeated fix
   failure means the mental model is wrong, not the patch
+
+## Debug / instrumentation logs
+Write all instrumentation/debug logs to ~/qelectrotech/debug-logs/ (gitignored)
+with descriptive names, e.g. `qet 2>debug-logs/<feature>-<purpose>.log`.
+Not /tmp (purged on reboot, hidden from Finder). CC reads its own output from
+there; recreate the dir after a fresh clone (it's gitignored, so not tracked).
   
 ## Testing requirements
 Before pushing any commit to origin, Claude must propose and the developer
