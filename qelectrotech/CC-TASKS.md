@@ -106,11 +106,38 @@ to its individual pre-group MVR value (de-facto pass-through, since ElementTextI
 keep-visual concept). The earlier "adopt-group-value / ungroup→all-OFF" idea is NOT adopted —
 keep the pre-existing revert-to-individual behaviour for backward-compat until community feedback.
 
-### Phenomenon B — cumulative text position drift on user-rotate + element-rotate  · OPEN (blocks layer-2 commit)
+### Phenomenon B — cumulative text position drift on user-rotate + element-rotate  · DECIDED, NOT IMPLEMENTED (blocks layer-2 commit)
 **Area:** element text rotation/readability · **Branch:** mirror-flip-rotate · **Blocks:** layer-2 orientation-correction commit
 **Symptom (confirmed via screenshots, frames 04-07 + retest):** when a text's OWN rotation is changed by the user (right-click "choose text orientation" / R90° UI), then the element is rotated repeatedly, the text's position creeps progressively further from the element reference point — accumulating per element rotation. NOT orientation (orientation re-establishes ISO correctly — that's Phenomenon A, working as designed); this is POSITION accumulation. Confirmed for MVR=ON text (and all text defaults to MVR=ON at instantiation); also reproduced with MVR=OFF (select OFF, rotate element 90°, user-rotate text 90° → bbox-centre rotates about the text top-left corner, then subsequent element rotation corrects about bbox-centre).
 **Root cause (confirmed by observation):** PIVOT MISMATCH. The layer-2 readability correction pivots about the text's bbox CENTRE; the user-rotate UI pivots about the bbox TOP-LEFT CORNER (or thereabouts). The two don't share a pivot, so position doesn't round-trip — each correction recomputes from a position the user-rotate displaced, and the residual accumulates. Same drift family as the layer-1 rotation drift, but in POSITION, triggered by own-rotate interleaved with element-rotate. NOT caught by gate β-1 (which tested clean rotation only, no user own-rotate mid-sequence).
 **Fix direction (agreed):** make the text user-rotate UI pivot about the bbox CENTRE (match the correction). Centre-pivot is rotation-invariant for position (centre stays fixed → no translation on repeated rotation) and makes user-rotate + correction COMMUTE → idempotent by construction. Preferred over making the correction match the corner-pivot (corner-pivot inherently translates the bbox per rotation — keeps drift potential alive). Likely also fixes a latent pre-existing "text jumps when rotated" UI inconsistency.
+
+**Scoping done (CC, /understand-anything, graph@8fd5431be used as map + verified live) — DECIDED: option (b).**
+Headline: there is no pivot *function* to edit. `RotateTextsCommand` (qetdiagrameditor.cpp:1540 sole caller → rotatetextscommand.cpp:73-76) just animates the `rotation` Q_PROPERTY; `QGraphicsObject::setRotation` pivots about `transformOriginPoint`, never set (default (0,0)) — for a text whose boundingRect starts at (0,0) that IS the bbox top-left. Comment at diagramtextitem.cpp:397 confirms: rotation about (0,0), redefinable in subclasses. So "corner pivot" = absence of position compensation, not a routine.
+
+Two structurally different fixes were on the table:
+- **(a)** `setTransformOriginPoint(centre)` — item-wide pivot policy; every `setRotation` on that item centre-pivots from then on.
+- **(b)** command-local position compensation — add a parallel "pos" animation to `RotateTextsCommand` that holds bbox centre fixed (same math as the committed `rotateAboutOwnCentre`), pivot machinery untouched.
+
+(a) is the better long-term substrate (it's literally "rotate about point P" — the mechanism parking-lot #1/#2 anchor-point rotate/move will need), so it wasn't dismissed lightly. Tiebreaker: how does the already-committed `correctReadability`/`rotateAboutOwnCentre` (element.cpp:1151-1163, commit 6f8dd772c) achieve ITS centre-pivot? Read the code — option (2): `setRotation` about default (0,0) **+ manual pos compensation** (`newPos = pos + R(own)·C − R(own+δ)·C`); comment explicit that transformOriginPoint is NOT mutated. So (a) now would double-count against that committed compensation → **(b) wins for this fix**; adopt transformOrigin-as-pivot later, in the same pass that migrates `rotateAboutOwnCentre`, when #1/#2 are actually scoped. Guardrail: don't build the transformOrigin-as-single-pivot-truth refactor now — that's anchor-feature scope, not B's.
+
+Two reasoning checks run during scoping (both relevant if (a) is ever revisited for #1/#2):
+1. transformOriginPoint governs only the item's OWN transform (rotation/scale), not how the parent element's transform carries the text in the scene — "inherited element transform" is NOT part of (a)'s blast radius (initial claim corrected).
+2. transformOriginPoint IS item-wide: under (a), the directly-selected-child branches in rotateselectioncommand.cpp:60 (dynamic text) and :67 (group) — which fire only when text/group is selected directly, not via its parent element — would also silently flip to centre-pivot. Confirmed, and would widen test surface + collide with correctReadability's compensation on those items. Not wanted now; relevant scope note for whenever (a) is revisited.
+
+**Implementation plan (b):** `RotateTextsCommand` — add a parallel "pos" animation alongside the existing "rotation" animation in the same `QParallelAnimationGroup` (rotatetextscommand.cpp ~73-76); undo/redo (:88/:100) reverses for free since the group runs backward/forward. No `transformOriginPoint` mutation. No touch to `rotateAboutOwnCentre`. `fromXml` confirmed NOT in this path (dynamicelementtextitem.cpp: setRotation at :164, setPos at :221, no RotateTextsCommand involved) — existing-file load is provably unaffected; this is a live-UI-action-only change.
+
+**Test matrix (from scoping, supersedes the one-line "Verify" below):**
+*Existing-file regression (must be byte/render-identical):*
+1. Open several existing .qet with rotated dynamic text (0/90/180/270) → unchanged (load path doesn't invoke RotateTextsCommand).
+2. Open → save without touching text → x/y/rotation byte-identical.
+*Phenomenon B acceptance:*
+3. Dialog-rotate (90/180/270) + element-rotate ≥2 full 360° laps → no cumulative drift, returns to lap-start each lap.
+4. Interleaved dialog-rotate + element-rotate + mirror + flip, mixed order → save/reload → live == reload.
+5. Undo/redo: dialog-rotate → undo → exact original pos+rotation; redo restores (confirms parallel pos animation reverses cleanly).
+6. Grouped text: dialog-rotate a group → pivots about group bbox centre coherently, member spacing preserved.
+7. Layer-2 consistency: re-run a γ-subset ({plain, M↮F, M&F} × a few of {0,90,180,270}) with the now-consistent pivot → orientation still R, position correct.
+
 **Caution:** changing the user-rotate pivot is a behavioural change to a PRE-EXISTING UI action — verify it does NOT shift text in EXISTING .qet files on load (stored positions should be untouched; only the moment-of-rotation behaviour changes). Check whether the corner-pivot is text-rotate-only or shared by other rotation paths (element rotate already uses centre) — surgical if isolated.
 **Verify (measure, don't assume):** per-text dump of own + pos/ctr across interleaved user-rotate + element-rotate ≥2 full laps; ctr must return to start (no accumulation). Plus existing-file load unperturbed. THEN this fix + the layer-2 orientation correction commit together as one clean piece (tempered commit message).
 
