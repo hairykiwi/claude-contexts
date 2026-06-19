@@ -85,6 +85,34 @@ Touch only what the task requires:
 - If your changes make imports/variables/functions unused, remove them.
 - Don't remove pre-existing dead code unless asked — mention it instead.
 
+**Nomenclature: no internal shorthand in upstream-facing text**
+Session-local terms (layer-1/2, MVR, gate-1/2/α/β/γ, "phenomenon X", architecture
+labels like "A'") are working shorthand for chat/CC-TASKS.md/fix-metrics.md ONLY.
+They must never appear in source comments, @briefs, or commit messages — those are
+read by Laurent and upstream, who have no context for them. Describe the actual
+mechanism instead (what the code does, which function, which commit hash). Sweep
+the whole diff for this before presenting it, not just the line being discussed —
+caught 3 times in one session by only fixing the line that was pointed out.
+
+**Commit message/comment text must match the tree AT THAT COMMIT**
+When a single piece of work spans multiple commits (e.g. a rename landing in a
+later commit than the code it describes), each commit's message and any doc
+comments in its files must be accurate to what exists in THAT commit's tree —
+not the final state after later commits. Caught twice in one session: a doc
+comment forward-referencing a not-yet-renamed function, and a commit message
+forward-referencing a not-yet-renamed function. Check this explicitly before
+each commit in a sequence, don't assume the first edit pass got it right.
+
+**Amending commits: local-only is free, pushed requires force-push — know which**
+Amending/rewriting a commit always creates a new SHA; the old one is discarded.
+If that commit was never pushed, this has no external consequence (nothing else
+references the old SHA) — safe by default. If it WAS pushed, amending requires a
+force-push and must be confirmed explicitly first, never done as a side-effect of
+an unrelated approval. Prefer a new follow-up commit over rewriting pushed history
+whenever the fix is additive (wording/nomenclature corrections, comment fixes) —
+only rewrite pushed history when the content itself must not survive (credentials,
+genuinely wrong information that can't simply be corrected forward).
+
 ## Diagnosing hard / confusing bugs (measure, don't hypothesise)
 Hard-won from the rotation-text fix (multi-session, ~6 wrong turns, all from
 guessing ahead of data). When behaviour is confusing or a fix attempt fails:
@@ -169,22 +197,27 @@ IEC 60617 wiring diagrams, terminal strips, and multi-folio
 documentation.
 
 ## Active branch / current work
-- Long-running integration branch on the fork: `qt6_cmake_joshua`.
-- CURRENT feature/fix work happens on dedicated branches cut from a tree
-  that BUILDS (see "Branching lesson" below), e.g. `folio-mirror-flip`
-  (feature, done/posted) and `fix-grouped-text-rotation-pivot` (active).
+- Active integration branch: `mirror-flip-rotate` (off `qt6_cmake_joshua`; clean-merges
+  `folio-mirror-flip` + cherry-picked layer-1 `843ba6898`). Latest commits, in order:
+  `b0a405329` (grouped+flip position fix), `6f8dd772c` (readability correction, [WIP] —
+  see CC-TASKS.md ACTIVE for the residual trigger-lag item), `bd61ca17c` (text-rotate
+  pivot fix), `feeef3cea` (nomenclature normalization). Push is fast-forward on origin;
+  no force-push so far this branch — keep it that way (new commit > rewrite, when the
+  fix is additive).
 - Do NOT assume Qt5 APIs are available. Targets Qt 6.x with KF6.
 
 ### Two-PR plan (folio mirror/flip work)
-1. **macOS Qt6 build fixes** — own branch; the genuine upstream-worthy build
-   fixes from the recovery recipe below (NOT main.cpp, NOT the obsolete
-   projectview signature changes). Awaiting Laurent's reply on the CMakeLists
-   guard form before sending. Target: master (build fixes are version-agnostic).
-2. **Rotation-pivot bug fix** — own branch (`fix-grouped-text-rotation-pivot`);
-   `elementtextitemgroup.cpp` updateAlignment(). Target master at PR time
-   (bug file is byte-identical master/joshua). Rebase after PR #1 lands.
+1. **macOS Qt6 build fixes** — own branch; the genuine upstream-worthy build fixes from
+   the recovery recipe below (NOT main.cpp). The `CMakeLists.txt` Linux-only-install guard
+   is SUPERSEDED — Laurent independently committed the equivalent fix to QET master as
+   `5574b4d`. On next rebase/sync onto current upstream, REVERT the local guard in favour
+   of upstream's version; do not carry it forward as a local build-enabler. Remaining Set A
+   items (below) are still open PR candidates.
+2. **Rotation-pivot bug fix** — the original `fix-grouped-text-rotation-pivot` branch
+   content (`elementtextitemgroup.cpp` updateAlignment) is folded into `mirror-flip-rotate`
+   via the `843ba6898` cherry-pick; that branch itself is superseded, don't develop on it.
 - Feature PR (folio mirror/flip) is already implemented on `folio-mirror-flip`;
-  rebase/submit after the above land. Laurent invited it to master (pid 23013).
+  rebase/submit after Set A lands. Laurent invited it to master (pid 23013).
 
 ### Branching lesson (IMPORTANT — avoids re-deriving build fixes)
 Develop on a tree that ALREADY BUILDS; reconcile to the PR-target base only
@@ -325,6 +358,16 @@ plain reconfigure will do.
   (because of the main.cpp app-name hack), NOT `qelectrotech`. Matters for
   `defaults read/write org.qelectrotech.QElectroTech-Qt6 <key>`.
 
+## Known harmless diagnostics (non-runtime, editor/LSP only)
+- Without a `compile_commands.json`, clangd cannot resolve Qt includes at all —
+  one failure ("QUndoCommand not found" or similar) cascades into "unknown type"
+  on every downstream Qt-typed line in that file. Symptom looks alarming (can
+  report "N new diagnostic issues") but is pure LSP noise, unrelated to any edit
+  just made. VERIFY against the actual `make` build log (warnings/errors count),
+  not the editor's diagnostics panel — that's the authoritative source. Don't
+  let a large diagnostics count block a commit without checking it traces to
+  this cause first.
+
 ## Known harmless runtime messages (running uninstalled from build tree)
 Do not re-investigate these — known, non-blocking:
 - `failed to load qet_en ".../Resources/lang/"` — only fires if Set B path fix
@@ -341,19 +384,8 @@ To get the current count: git rev-list --count upstream/qt6_cmake_joshua..HEAD
 Known remaining issues are listed below — keep in sync with commits.
 
 ## Known remaining issues (not yet fixed)
-- Rotated element text readability (LAYER 2, not yet done). LAYER 1 (rigid
-  rotation / correct position) is FIXED — commit 843ba6898: suppressed the
-  parentElementRotationChanged keep-visual counter-rotation for all element
-  text, so text rotates rigidly with the element (upside-down at 180°,
-  correctly placed, matching reload). LAYER 2 remaining: de-rotate text about
-  its own bbox centre so it reads correctly (read from bottom/right, never
-  inverted; 90° steps only) WITHOUT reintroducing the layer-1 double-count.
-  m_keep_visual_rotation kept intact as the hook. See CC-TASKS.md for the full
-  diagnosis (root cause was the counter-rotation double-counting against the
-  element parent-transform; the earlier transformOriginPoint / mirror-flip
-  framing was superseded).
-- `sources/main.cpp`: app name temporarily set to "QElectroTech-Qt6"
-  to avoid SingleApplication conflict with Qt5 build — revert before PR
+- `sources/main.cpp` app-name workaround — see "Claude Code instructions" above;
+  never stage it.
 - .understand-anything/ knowledge graph committed to branch (bfc312780) —
   must be excluded from any upstream PR (see PR-prep instructions above)
 - `The requested buffer size is too big` — Qt6 SVG renderer stricter
