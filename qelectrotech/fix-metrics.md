@@ -75,3 +75,68 @@ Tool calls / token cost: not captured
 Scope: layer 1 (rigid rotation / correct position) only. Layer 2 (text
 readability de-rotation about own centre) deferred; m_keep_visual_rotation
 kept intact for its reintroduction.
+
+## b0a405329 — Fix grouped dynamic text displacement on folio flip
+Token cost: not captured | Tool calls: not captured | Graph queries: 0 | First attempt: PASS
+Gate-2 (layer-2) sub-fix, separated from the orientation correction. Measure-first:
+[L2GRP] dump compared live-flip vs reload across 0/90/180/270 in one run, proving
+the displacement is consistently baked into applyMirrorFlip()'s compensate() (live
+== reload) and quantitatively isolating the cause — group bbox top-left offset
+(br.y()=-33) vs compensate's implicit (0,0)-origin assumption (mirror keys off x
+where br.x()=0, hence mirror-clean / flip-displaced). Fix = reflect about the bbox
+near+far edges (left+right / top+bottom) instead of bare width/height; no-op for
+origin-(0,0) bboxes so ungrouped + mirror byte-unchanged. Derived the +2*top
+correction from the data BEFORE coding; implemented once, verified all four
+rotations land at the exact reflection about element origin, live == reload.
+
+## 6f8dd772c — Make rotated element text ISO-readable (folio mirror/flip/rotate) [WIP]
+Token cost: not captured | Tool calls: not captured | Graph queries: 0 | First attempt: PASS (gate-driven)
+Layer-2 readability — the deferred follow-on to layer-1 (843ba6898). Notably
+cleaner path than layer-1's FAIL×5→PARTIAL→PASS, BY METHOD not luck: a measure-first
+gate process. Gate 1 proved the I/R classifier empirically against the observation
+table BEFORE any correction was wired — and caught a real classifier bug there
+(sceneTransform-determinant can't see QET's position-rewrite mirror; switched to
+logical-state parity = mirror XOR flip + summed rotation). Only after the classifier
+matched all 24 cells did the correction get wired. The wired correction then passed
+all three gates on first build: α (layer-1 plain-rotate regression clean — protected
+by the A' guard that skips compensate on unmirrored rotate), β (idempotency, no
+rotation drift over >=2 360 laps across {MVR off/on}x{mirror off/on}), γ (24-cell
+orientation + position + save/reload). Architecture (A'): all triggers funnel through
+applyMirrorFlip, orientation-correct-then-compensate, so the readability pivot never
+sees a stale reflection transform. The "catch the bug at the classifier gate, not in
+the field" discipline is the signal worth recording — the gates front-loaded the
+failure that layer-1 paid for in re-coding.
+Known limitation at time of this commit (WIP): manual text-rotate (corner pivot)
+vs readability (centre pivot) mismatch causes cumulative position drift under
+repeated element rotation; common no-manual-rotate case unaffected.
+[UPDATE bd61ca17c: this pivot-mismatch drift is now fixed. The residual WIP item
+is the correction-trigger lag — own-rotation-change doesn't re-fire
+correctReadability until the next element-level event. Tracked in CC-TASKS.md.]
+
+## bd61ca17c — Pivot directly-selected text rotation about its bounding-rect center
+Token cost: not captured | Tool calls: not captured | Graph queries: 0 | First attempt: PASS (functional)
+This is the Phenomenon B fix (the limitation logged just above). Option (b) from the
+scoping: command-local pos compensation, no transformOriginPoint. The dialog path
+(RotateTextsCommand) was already done but uncommitted from the prior session; this
+commit extracts the centre-pivot end-pos math into a shared header (rotationpivot.h)
+and applies the same parallel "pos" compensation to the R90° quick-rotate path
+(RotateSelectionCommand dynamic-text + group branches). Confirmed RotateSelectionCommand's
+QPropertyUndoCommand stores old+new explicitly, so undo reverses for free — different
+mechanism from RotateTextsCommand's animation-group but same clean-undo result.
+Fix LOGIC correct first build/first test: matrix 1-4 + 6 PASS; item 5 PARTIAL =
+the pre-existing correction-trigger lag (own-rotation-change doesn't re-fire
+correctReadability until the next element-level event), a separate known issue, NOT
+this pivot fix. So First attempt = PASS on the fix itself.
+Where the session time actually went (the honest signal): almost none on the fix logic,
+nearly all on PR-hygiene and commit-craft. (1) Caught that bbox / British "centre" /
+"layer-1/2" / "architecture A'" / "mvr" are fork-local idioms absent from upstream
+(grep-verified vs master + qt6_cmake_joshua) and unfit for the upstream-bound files;
+stripped them, renamed mvr->keep_visual_rotation (matching the existing member + XML
+attr) and rotateAboutOwnCentre->rotateAboutOwnCenter. (2) Verified the LSP "10 errors"
+panic was a missing-compile_commands.json artifact (every error rooted in a Qt header
+"file not found"), not real — make built clean, 0 warnings. (3) Two-commit split
+(feeef3cea = comment/naming normalization, no behavioural change; this = the fix) with
+each commit kept self-consistent message<->tree, including splitting the rotationpivot.h
+rotateAboutOwnCent* comment ref so it matches the function's actual name at each commit.
+Lesson: for upstream-bound files, run the fork-idiom grep (bbox|centre|internal phase
+labels) BEFORE writing comments, not after — would have saved several correction rounds.
