@@ -16,8 +16,9 @@ orientation and future-fix insight. Don't duplicate diffs here; do keep reasonin
 
 ## ACTIVE
 
-### Rotated-element text readability — LAYER 2 (de-rotation + layout)  · VALIDATED but COMMIT BLOCKED (Phenomenon B position drift — see separate entry)
-**Status (Jun 2026):** classifier gate-1 PASSED (logical-state parity/theta reproduces the 24-cell table); orientation correction built and gates α (layer-1 regression clean), β (no rotation drift; OFF confirmed forward-acting — orientation PASS), γ (24-cell orientation+position+save/reload) all PASS. Position fix for the grouped+flip ~group-height displacement committed separately as b0a405329. **DO NOT COMMIT the orientation correction yet:** a new defect surfaced post-gates (Phenomenon B — cumulative position drift when a text's OWN rotation is user-changed then the element is rotated repeatedly; pivot mismatch). Fix B first, then commit the correction WITH B fixed as one clean piece. Commit message must also be tempered (drop unqualified "ISO-conformant by default" — B undercuts the absolute claim). Remaining: fix Phenomenon B → re-verify idempotency → de-instrument → stage real hunks only → commit (tempered msg) → fix-metrics → push (with b0a405329). See known-quirks block at end of this entry, and the Phenomenon B entry below.
+### Rotated-element text readability — LAYER 2 (de-rotation + layout)  · COMMITTED (6f8dd772c, [WIP]) — Phenomenon B FIXED, residual WIP = correction-trigger lag
+**Status (Jun 2026):** classifier gate-1 PASSED (logical-state parity/theta reproduces the 24-cell table); orientation correction built and gates α (layer-1 regression clean), β (no rotation drift; OFF confirmed forward-acting — orientation PASS), γ (24-cell orientation+position+save/reload) all PASS. Position fix for the grouped+flip ~group-height displacement committed separately as b0a405329. Orientation correction committed as 6f8dd772c, flagged [WIP] at the time pending Phenomenon B (below).
+**UPDATE (Jun 2026, later same week):** Phenomenon B is now FIXED — see RESOLVED entry below (bd61ca17c, pivot fix on the "Rotate 90°" quick-rotate path; the dialog path, `RotateTextsCommand`, was already correct). A nomenclature-normalization follow-up also landed as feeef3cea (strips internal layer/MVR/gate shorthand from element.cpp/.h comments + identifiers — `mvr`→`keep_visual_rotation`, `rotateAboutOwnCentre`→`rotateAboutOwnCenter`, `bbox`→`bounding rect`; no behavioural change). [WIP] on 6f8dd772c is NOT closed: a separate, newly-identified correction-trigger lag remains open (own-rotation-change doesn't re-fire `correctReadability` until the next element-level rotate/mirror/flip) — see new ACTIVE entry below. The tempered commit message on 6f8dd772c (no unqualified "ISO-conformant by default" claim) remains accurate; the trigger lag is now the documented residual caveat in place of Phenomenon B.
 **Area:** element text rotation/readability · **Branch:** mirror-flip-rotate (integration; off qt6_cmake_joshua, clean-merges folio-mirror-flip + cherry-picked layer-1 843ba6898)
 **Depends on:** layer-1 (DONE, 843ba6898 — text rotates rigidly with element; that's the substrate this corrects). See memory note for the standards detail.
 **Related (separate, not a dependency):** shares the ungroup/`removeFromGroup` path with the "Genuine ungroup of a mirrored element displaces text" entry. That one is a mirror-geometry positional bug (persists to disk); this is rotation-orientation display logic. Don't merge them — but whoever codes second must not regress the first in the shared function.
@@ -99,6 +100,12 @@ funnels rotate+mirror+flip through applyMirrorFlip with ordered correct-then-com
    manually ONCE; OFF maintains ISO from there. This is the same stateless principle as
    "MVR = what's currently displayed, no hidden history". Confirmed by test: set OFF after an ON
    episode, then rotate 90/180/270 — each subsequent rotation is ISO-correct (PASS).
+3. **Non-cardinal angles generalize acceptably (confirmed, Jun 2026).** Ungrouped text set to
+   non-cardinal angles (tested 20°/70°, boundary 44°/46°) retains the angle relative to the
+   element correctly — the readability correction works beyond the assumed 90°-step design
+   intent. Supersedes an earlier assumption that non-cardinal angles were out of scope; users do
+   reach them and current behaviour is acceptable (genuine ambiguity only at the 46° boundary
+   case, where either orientation reading has a reasonable argument).
 
 **Group/ungroup MVR (as-built, LEAVE AS-IS pending community input):** the group exposes no MVR
 control; grouping a mixed set leaves each text's own MVR untouched, and ungroup reverts each text
@@ -106,8 +113,9 @@ to its individual pre-group MVR value (de-facto pass-through, since ElementTextI
 keep-visual concept). The earlier "adopt-group-value / ungroup→all-OFF" idea is NOT adopted —
 keep the pre-existing revert-to-individual behaviour for backward-compat until community feedback.
 
-### Phenomenon B — cumulative text position drift on user-rotate + element-rotate  · DECIDED, NOT IMPLEMENTED (blocks layer-2 commit)
-**Area:** element text rotation/readability · **Branch:** mirror-flip-rotate · **Blocks:** layer-2 orientation-correction commit
+### Phenomenon B — cumulative text position drift on user-rotate + element-rotate  · RESOLVED (bd61ca17c)
+**RESOLUTION (Jun 2026):** fixed per the plan below, option (b) — shared `rotationpivot.h` helper (`centerPivotEndPos`, renamed from `centrePivotEndPos` in the nomenclature pass), parallel "pos" compensation applied at `RotateSelectionCommand`'s directly-selected dynamic-text (:60) and group (:67) branches. The dialog path (`RotateTextsCommand`) needed no fix — confirmed already centre-pivoting correctly; the defect was isolated to the right-click "Rotate 90°" quick-increment button, which routes through `RotateSelectionCommand`, a different command to the one originally scoped and patched first. Test matrix: items 1–4, 6 PASS clean. Item 5 (interleaved R90°+rotate+mirror+flip, save/reload) returned PARTIAL — text position momentarily diverged from expected, then converged to zero divergence after one subsequent element rotation (90° minimum observed to clear; no further accumulation beyond that), with save/reload showing no accumulated error in either state. Root-caused as a DIFFERENT, pre-existing defect — not a flaw in this fix — see the new "correction-trigger lag" entry below, which this PARTIAL result is the founding evidence for. Pushed as bd61ca17c (fast-forward on top of 6f8dd772c); nomenclature normalization landed alongside as feeef3cea.
+**Area:** element text rotation/readability · **Branch:** mirror-flip-rotate · **Blocked (historically):** layer-2 orientation-correction commit — no longer blocking, see RESOLUTION above
 **Symptom (confirmed via screenshots, frames 04-07 + retest):** when a text's OWN rotation is changed by the user (right-click "choose text orientation" / R90° UI), then the element is rotated repeatedly, the text's position creeps progressively further from the element reference point — accumulating per element rotation. NOT orientation (orientation re-establishes ISO correctly — that's Phenomenon A, working as designed); this is POSITION accumulation. Confirmed for MVR=ON text (and all text defaults to MVR=ON at instantiation); also reproduced with MVR=OFF (select OFF, rotate element 90°, user-rotate text 90° → bbox-centre rotates about the text top-left corner, then subsequent element rotation corrects about bbox-centre).
 **Root cause (confirmed by observation):** PIVOT MISMATCH. The layer-2 readability correction pivots about the text's bbox CENTRE; the user-rotate UI pivots about the bbox TOP-LEFT CORNER (or thereabouts). The two don't share a pivot, so position doesn't round-trip — each correction recomputes from a position the user-rotate displaced, and the residual accumulates. Same drift family as the layer-1 rotation drift, but in POSITION, triggered by own-rotate interleaved with element-rotate. NOT caught by gate β-1 (which tested clean rotation only, no user own-rotate mid-sequence).
 **Fix direction (agreed):** make the text user-rotate UI pivot about the bbox CENTRE (match the correction). Centre-pivot is rotation-invariant for position (centre stays fixed → no translation on repeated rotation) and makes user-rotate + correction COMMUTE → idempotent by construction. Preferred over making the correction match the corner-pivot (corner-pivot inherently translates the bbox per rotation — keeps drift potential alive). Likely also fixes a latent pre-existing "text jumps when rotated" UI inconsistency.
@@ -141,6 +149,13 @@ Two reasoning checks run during scoping (both relevant if (a) is ever revisited 
 **Caution:** changing the user-rotate pivot is a behavioural change to a PRE-EXISTING UI action — verify it does NOT shift text in EXISTING .qet files on load (stored positions should be untouched; only the moment-of-rotation behaviour changes). Check whether the corner-pivot is text-rotate-only or shared by other rotation paths (element rotate already uses centre) — surgical if isolated.
 **Verify (measure, don't assume):** per-text dump of own + pos/ctr across interleaved user-rotate + element-rotate ≥2 full laps; ctr must return to start (no accumulation). Plus existing-file load unperturbed. THEN this fix + the layer-2 orientation correction commit together as one clean piece (tempered commit message).
 
+### Readability-correction trigger lag (orientation AND position)  · OPEN, NOT YET SCOPED
+**Area:** element text rotation/readability · **Branch:** mirror-flip-rotate · **Related:** found via Phenomenon B's test item 5; orthogonal to it — B was WHERE rotation pivots, this is WHEN `correctReadability` re-fires.
+**Symptom:** after a user changes a text's OWN rotation (via "Choose text orientation" dialog OR the "Rotate 90°" quick button), the text is NOT immediately re-evaluated by `correctReadability` — confirmed it only re-fires on the FOLLOWING element-level rotate/mirror/flip event, not on the text's-own-rotation-changed event itself. CONFIRMED to affect POSITION as well as orientation (not just a delayed I→R flip): in a mixed-order sequence (R90° button + element-rotate + mirror + flip), text converged to its expected position only after a subsequent element rotation (90° minimum observed to clear; no further accumulation beyond that); zero residual once cleared, and save/reload showed no accumulated error regardless of state.
+**Trigger-gap question — partially answered, not closed:** in the one observed failing sequence, mirror/flip occurred BEFORE the R90° step (R90° was the last own-rotation-change; nothing element-level fired until the clearing rotation) — favours a SINGLE trigger gap (own-rotation-changed never fires `correctReadability`). A follow-up check (mirror/flip AFTER R90°) produced no unwanted behaviour, consistent with the single-gap theory. Not exhaustive — do not treat the two-gap possibility (mirror/flip path also having its own blind spot) as ruled out; needs further testing once this is actually scoped.
+**Tentative idea (explicitly flagged premature, NOT a decided direction):** reversing the sign of the text rotation, or overriding Qt's +y-south convention, might address the lag — needs full scoping/feature-spec first, including a cross-check against the gate-1 R/I/theta table (plain: 90°=I, 270°=R) so any sign change doesn't silently invalidate that table.
+**Scope as own session** — not a tack-on to the Phenomenon B pivot fix (resolved, see above) or to the LAYER 2 entry's [WIP] flag (this finding IS the reason that flag stays open).
+
 ### Genuine ungroup of a mirrored element displaces text  · DEFERRED
 **Area:** element text groups · **Branch:** folio-mirror-flip
 **Location:** `Element::removeTextFromGroup` → `elementtextitemgroup.cpp:1367`
@@ -155,6 +170,17 @@ right-click ungroup gesture exists.
 **Next:** own scoped session; read 1367 path, confirm same-shape vs trickier
 (it touches the shared removeFromGroup that's *correct* for unmirrored ungroup),
 write fix + verification matrix before implementing.
+
+### Grouped text at non-cardinal angles: offset overridden on ungroup/regroup  · DEFERRED (edge case)
+**Area:** element text rotation/readability · **Branch:** mirror-flip-rotate
+**Symptom (Jun 2026):** grouped text set to a non-cardinal angle has its angular offset overridden on ungroup/regroup despite MVR=OFF; one case showed a "wild pirouette" away from the element on ungroup. At an intermediate stage, the group's selection-box position decoupled from the text's actual bounding-rect (looked like the selection box mirrored/flipped about the text's real position). Not a crash; recoverable; narrow use case (ungrouped non-cardinal text is unaffected — see LAYER 2 known-quirks #3).
+**Lead:** deleting and reinstating 3 lines of text into a FRESH group (MVR=OFF before grouping) made behaviour match the well-behaved ungrouped-multiline case — suggests stale state surviving regroup, not a flaw in the angle math itself. Check what state regroup fails to reset.
+**Severity:** low — edge case, no crash, user-recoverable. Own scoped session when convenient.
+
+### Element-creation-time text rotation also pivots at top-left  · OPEN (scoping candidate)
+**Area:** element text rotation/readability · **Branch:** mirror-flip-rotate
+**Observation (Jun 2026):** element-creation-time text (terminal numbers/idents baked into the .elmt template, distinct from user-added `DynamicElementTextItem`) is untouched by the Phenomenon B pivot fix (bd61ca17c) and is user-rotatable at folio level — currently it ALSO pivots about its top-left corner, same defect class.
+**Next:** confirm code path/class (likely not `DynamicElementTextItem`-based) and whether it can reuse `rotationpivot.h`'s `centerPivotEndPos` directly or needs separate scoping. Not urgent; flagged for breadth-of-impact awareness.
 
 ### Title-block vars: id/total braced form fails  · OPEN (docs)
 **Area:** title block variable substitution · **Branch:** qt6_cmake_joshua @ f16cf7d
@@ -352,7 +378,20 @@ the same menu answers it. Either alone is half the story. Separate from the
 layer-2 correctness work (this is UI affordance over that behaviour); touches
 menu/UI code, not the geometry — cleaner as its own commit/PR.
 
+### 8. Non-destructive Rotate/Mirror/Flip RESET
+Clear all transforms on a selected element, returning it to its on-disk render,
+while KEEPING all user-added text. Grouped-rotated text transforms are exempt
+from the reset (their rotation is relative to the group, not the element's
+transform stack — resetting the element shouldn't move them). Useful as an
+"undo all my fiddling" escape hatch distinct from the regular undo stack.
+
+### 9. Enable Mirror and Flip while placing an element
+Rotate already works during placement (before the element is dropped onto the
+folio); Mirror and Flip currently don't. Parity fix — let the user orient an
+element fully before committing its position, same as Rotate already allows.
+
 ### Dependency sketch
 - #1 -> #2 (anchor visible before drag-by-anchor).
 - #3 -> #4 -> #5 (terminal identity -> netlist -> BOM); #6 also feeds #5.
 - #3 is the highest-leverage cornerstone; #1 is the cheapest standalone win.
+- #8, #9 are standalone — no dependencies either direction.
