@@ -16,6 +16,106 @@ orientation and future-fix insight. Don't duplicate diffs here; do keep reasonin
 
 ## ACTIVE
 
+### ⚠️ UNCOMMITTED INSTRUMENTATION IN TREE — element.cpp CCDUMP  · ACTIVE (do not commit)
+**As of 2026-06-20, HEAD 0a734cdc5:** `sources/qetgraphicsitem/element.cpp` carries
+an uncommitted temporary `CCDUMP` instrumentation block inside `Element::fromXml`
+(a `{ ... }` block replacing the bare `applyMirrorFlip();` call at ~line 848). It
+logs, per text, the stored-XML rotation/pos (BEFORE applyMirrorFlip), the live
+displayed values (AFTER), and what `toXml` would serialize (WOULD-SAVE) — written to
+stderr with the `[CCDUMP]` prefix. **Deliberately LEFT IN** to support the
+silent-rewrite / ISO-forcing-reframe investigation below. **Must NEVER be staged or
+committed.** Revert with `git checkout -- sources/qetgraphicsitem/element.cpp` once
+the investigation is resolved (then `make -j8` to rebuild clean). The currently-built
+`build_qt6/qelectrotech` binary INCLUDES this instrumentation. Test inputs +
+captured logs live in `debug-logs/` (gitignored): `prefix_mirrorflip_test.qet`
+(pre-fix authored values), `corrected_saved_test.qet` (post-correction values),
+`ccdump.log` (run 1 = pre-fix load), `ccdump2.log` (run 2 = corrected reload).
+(We lost a CC connection mid-session once; this note exists so a fresh session learns
+the tree state from the file, not from memory.)
+
+### Silent rewrite of authored text orientation/position on open+save  · INVESTIGATION COMPLETE (empirical)
+**Question answered (2026-06-20, measured via the CCDUMP harness above, not inferred):**
+Opening a pre-fix .qet with a mirrored/flipped/rotated element carrying template text,
+then saving, **silently rewrites the stored text `rotation` and `x`/`y`** whenever the
+readability correction is non-trivial — with NO prompt and NO modified-flag indication.
+- **Mechanism:** `fromXml` calls `applyMirrorFlip()` UNCONDITIONALLY (element.cpp:848,
+  even mirror=flip=false) → `correctReadability` → `rotateAboutOwnCenter` (setRotation+
+  setPos). `DynamicElementTextItem::toXml` serializes LIVE pos/rotation (dynamicelement
+  textitem.cpp:93-95), so the correction lands on disk. `compensateMirrorFlip` sets only
+  a `setTransform` (NOT serialized) → never contributes to the rewrite.
+- **No indication:** `m_modified` defaults false (qetproject.h:255); the load path never
+  calls `setModified(true)` (those are user-action-bound). So no asterisk, no save-on-close
+  prompt — in-memory geometry diverges from disk silently; written the instant the user
+  saves for any reason.
+- **Measured cases (run 1 → ccdump.log), stored → after-load/would-save:**
+  - "12" mirror, orient 0, MVR-on: rot0,(-14,13.5) → UNCHANGED (net 0 = no-op).
+  - "10K" mirror, orient 1, MVR-on: rot0,(-36.5,-4.5) → rot270,(-34.1875,14.8125). REWRITE.
+  - "5volt" flip, orient 2, MVR-off: rot0,(6,-27.5) → rot180,(32.7031,-10.5). REWRITE.
+- **One-time, not cumulative (run 2 → ccdump2.log):** reloading the corrected file is a
+  fixed point — BEFORE==AFTER==would-save for all three. The correction is idempotent, so
+  the rewrite is a one-time migration on first open of a pre-fix file, not ongoing churn.
+
+### Reframe scoping: is ISO orientation-forcing separable from the geometric bug fixes?  · SCOPING COMPLETE (no implementation)
+**Hypothesis under test:** `correctReadability`'s I→R 180°-flip is a separable POLICY layer
+bolted onto two clean GEOMETRIC fixes (rotationpivot.h centre-pivot; compensateMirrorFlip
+position-under-reflection). If so, OFF-MVR could default to tier-3 ("rotate where the user
+put it, correctly pivoted + positioned under mirror/flip, no auto re-orientation"), with
+ISO folded back as an explicit per-text opt-in (tier-2) rather than forced.
+
+**Findings (traced live against the instrumented tree; line refs are clean-tree, the
+in-tree CCDUMP block shifts them +~28):**
+- **Q1 — policy vs geometry split is CLEAN at the code boundary.** `correctReadability`
+  (element.cpp ~1185-1202) is 100% policy, no geometric-necessity code. Its body = the
+  gate-1 classifier (`parity = m_mirror^m_flip`, `net` = snapped rotation sum) + TWO
+  single-statement actuators: MVR-ON `rotateAboutOwnCenter(item,-net_raw)` (force tops-up)
+  and MVR-OFF `if(inverted) rotateAboutOwnCenter(item,180)` (the I→R flip). Each is gateable
+  behind one condition. The geometric fixes live in SEPARATE functions —
+  `centerPivotEndPos` (rotationpivot.h, the user-rotate centre-pivot) and
+  `compensateMirrorFlip` (reflection position) — invoked as their own steps. The user-rotate
+  commands already apply geometry (centerPivotEndPos) and policy (correctTextReadability
+  finalize) as two distinct stages (rotateselectioncommand.cpp:71/84 + :152; rotatetexts
+  command.cpp:84/91 + :175).
+- **Q2 — removing forcing DOES kill the orientation rewrite at the root (confirmed, not
+  faith).** `rotateAboutOwnCenter` is reachable ONLY from inside `correctReadability` (grep:
+  two call sites, both there). So tier-3 (both branches gated) ⇒ correctReadability is a
+  no-op ⇒ rotateAboutOwnCenter never fires on plain load ⇒ no serialized rewrite. CAVEAT: the
+  MVR-ON tops-up de-rotate is ALSO a forcing and ALSO rewrites (case "10K" proved it for ON
+  text). So "remove the forcing" must be precise: tier-3 must be the DEFAULT (flip default
+  ON→OFF) for the common case to stop rewriting; explicit MVR-ON text keeps de-rotating by
+  design.
+- **Q3 — compensateMirrorFlip still must run on load, and is already rewrite-free.** It is the
+  geometric reflection-position fix; mirrored/flipped text is mis-placed without it,
+  independent of orientation tier. It calls ONLY `setTransform` (element.cpp:1109/1152) — not
+  setPos/setRotation — and the transform is NOT serialized, so it NEVER causes a rewrite
+  (confirmed by case "12": compensate fired, zero serialized change). ⇒ The ENTIRE silent
+  rewrite is from rotateAboutOwnCenter (policy), none from the geometry.
+- **Q4 — downstream entanglement is at the VALIDATION/semantics level, not the code.** Gating
+  the forcing redefines "correct default behaviour" so these need re-baselining (not
+  re-coding): (a) the gate-1 classifier still runs but its `inverted` output goes unused
+  unless a tier-2 opt-in consumes it — becomes dormant; (b) the trigger-lag fix (0a734cdc5)
+  is HALF still needed — its orientation re-fire becomes a no-op for tier-3, but its
+  compensateMirrorFlip re-fire on own-rotation under mirror/flip (incl. the undo-recompute
+  reasoning) STILL applies; keep correctTextReadability, just its correctReadability sub-call
+  no-ops; (c) the 24-cell R/I table currently asserts default = all-R (ISO); under tier-3 it
+  must be re-baselined to the raw layer-1 (843ba6898) R/I pattern — the table as a classifier
+  test stays valid, as a displayed-orientation test it changes meaning per tier.
+
+**Verdict:** orientation-forcing is cleanly GATEABLE at the code level (isolated single
+statements + a solely-owned actuator); the geometric fixes are already separate and stay.
+The orientation-half of the silent rewrite disappears at the root for tier-3-default text.
+What remains of the modified-flag fix: ONLY the legacy explicit-MVR-ON migration case, which
+run 2 showed is one-time/idempotent — so it shrinks to at most "don't silently rewrite legacy
+ON text on first load," possibly moot entirely if the default flips to OFF.
+
+**One thing NOT yet empirically confirmed (the "should-be-no-op, wasn't" risk — do NOT take
+on faith):** that `compensateMirrorFlip`, reading an UN-re-oriented rotation (because
+correctReadability was gated), still positions mirrored/flipped text correctly on load. The
+applyMirrorFlip comment (element.cpp:1074-1075) orders compensate AFTER correctReadability "so
+it reads the corrected rotation/pos" — that ordering assumes the correction changed something.
+CHECK before committing to the reframe: gate the flip in a throwaway build, load a mirrored
+file via the CCDUMP harness, confirm text position is still right. This is the decision input,
+not a green light.
+
 ### Rotated-element text readability — LAYER 2 (de-rotation + layout)  · COMMITTED (6f8dd772c, [WIP]) — Phenomenon B FIXED, residual WIP = correction-trigger lag
 **Status (Jun 2026):** classifier gate-1 PASSED (logical-state parity/theta reproduces the 24-cell table); orientation correction built and gates α (layer-1 regression clean), β (no rotation drift; OFF confirmed forward-acting — orientation PASS), γ (24-cell orientation+position+save/reload) all PASS. Position fix for the grouped+flip ~group-height displacement committed separately as b0a405329. Orientation correction committed as 6f8dd772c, flagged [WIP] at the time pending Phenomenon B (below).
 **UPDATE (Jun 2026, later same week):** Phenomenon B is now FIXED — see RESOLVED entry below (bd61ca17c, pivot fix on the "Rotate 90°" quick-rotate path; the dialog path, `RotateTextsCommand`, was already correct). A nomenclature-normalization follow-up also landed as feeef3cea (strips internal layer/MVR/gate shorthand from element.cpp/.h comments + identifiers — `mvr`→`keep_visual_rotation`, `rotateAboutOwnCentre`→`rotateAboutOwnCenter`, `bbox`→`bounding rect`; no behavioural change). [WIP] on 6f8dd772c is NOT closed: a separate, newly-identified correction-trigger lag remains open (own-rotation-change doesn't re-fire `correctReadability` until the next element-level rotate/mirror/flip) — see new ACTIVE entry below. The tempered commit message on 6f8dd772c (no unqualified "ISO-conformant by default" claim) remains accurate; the trigger lag is now the documented residual caveat in place of Phenomenon B.
