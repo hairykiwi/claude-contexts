@@ -140,3 +140,43 @@ each commit kept self-consistent message<->tree, including splitting the rotatio
 rotateAboutOwnCent* comment ref so it matches the function's actual name at each commit.
 Lesson: for upstream-bound files, run the fork-idiom grep (bbox|centre|internal phase
 labels) BEFORE writing comments, not after — would have saved several correction rounds.
+
+## 023070fd8 — Extract compensateMirrorFlip helper from applyMirrorFlip
+Token cost: not captured | Tool calls: not captured | Graph queries: 0 | First attempt: PASS
+Pure extract-method refactor of applyMirrorFlip's per-item reflection-compensation
+lambda into a private member, so the trigger-lag fix (0a734cdc5) can reuse it. No
+behavioural change. The notable discipline here: the developer caught that the
+"no behavioural change, verified" claim must describe what was tested AT THAT
+commit's tree, not inferred from the final combined state — Group C had only been
+run against the combined tree (extract + fix). So we rebuilt an EXTRACT-ONLY binary
+(stash the command files + temporarily remove correctTextReadability) and re-ran
+Group C against that, THEN committed. Set up so each commit stages whole files (no
+partial-staging of element.cpp/.h): isolate commit-1 tree → commit 1 → restore fix
+→ commit 2. Worth remembering as the clean pattern for split commits sharing a file.
+
+## 0a734cdc5 — Re-correct element text readability and reflection on its own rotation
+Token cost: not captured | Tool calls: not captured | Graph queries: 1 (graph stale, predated 4 commits; used /understand only as a map, verified all from live tree) | First attempt: FAIL→PASS (two gaps; second found by test)
+The trigger-lag fix proper (the residual WIP from 6f8dd772c/bd61ca17c). Investigation-
+first paid off: traced every correctReadability/compensate trigger from the live tree
+(graph was stale), settled single-vs-two-gap for the ORIENTATION trigger from the
+connection logic (not the one observed sequence) — correctReadability reads item
+rotation live, so once any element event fires it's correct; the gap was purely the
+missing own-rotation trigger. Animation hazard ruled out the naive one-line connect
+(per-frame firing + setRotation re-entrancy), so option (i) command-driven finalize:
+public Element::correctTextReadability wrapper, called from RotateTextsCommand's
+anim-group finished() and RotateSelectionCommand's redo()/undo() (those branches made
+synchronous so re-redo reads the settled rotation).
+First-attempt = FAIL→PASS because testing exposed a SECOND, distinct gap the
+orientation trace didn't predict: in an already-mirrored/flipped element the POSITION
+(compensate) also goes stale on own-rotation — applyMirrorFlip pairs correctReadability
+WITH compensate per item, but the wrapper only did the first. Found via the test
+matrix (test 5 combined-M|F), measured with MFDBG instrumentation on the mirror/flip
+path, fixed by extracting compensate (023070fd8) and having the wrapper call it under
+mirror/flip. That second gap also forced the undo() correction call (compensate sets
+an absolute item transform the rot/pos reversal doesn't restore).
+Instrumentation discipline carried the session: per-item center/pos/rot/xform dumps +
+mvr= tag (to catch MVR-ON contamination), single-run before/after comparisons, and a
+SETTLED phase that empirically killed the QParallelAnimationGroup race question. The
+"measure, don't hypothesise" rule earned its keep — the second gap would have been
+guessed wrong (I'd hypothesised a parity-classifier miss; the dump showed parity/net
+correct and the issue was the absent compensate trigger).
