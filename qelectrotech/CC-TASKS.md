@@ -32,6 +32,15 @@ captured logs live in `debug-logs/` (gitignored): `prefix_mirrorflip_test.qet`
 `ccdump.log` (run 1 = pre-fix load), `ccdump2.log` (run 2 = corrected reload).
 (We lost a CC connection mid-session once; this note exists so a fresh session learns
 the tree state from the file, not from memory.)
+**UPDATE 2026-06-21 (HEAD still 0a734cdc5):** the in-tree instrumentation was EXTENDED
+for the compensate-independence test (below) and the binary rebuilt (mtime 21 Jun 09:21):
+(a) the `dumpTexts` lambda now also logs `sceneRect` (`sceneBoundingRect()`) +
+`sceneCenter` (`mapToScene(boundingRect().center())`); (b) `Element::correctReadability`
+now has a temporary env-gate at its top — `QET_GATE_READABILITY=1` makes it a pure no-op
+(tier-3) and logs `[CCDUMP] correctReadability GATED (env) — no-op`; unset = shipping
+behaviour. BOTH additions are part of the same do-not-commit instrumentation; the SAME
+`git checkout -- sources/qetgraphicsitem/element.cpp` reverts everything. New captured
+logs: `ccdump-active.log` (correction ON), `ccdump-gated.log` (`QET_GATE_READABILITY=1`).
 
 ### Silent rewrite of authored text orientation/position on open+save  · INVESTIGATION COMPLETE (empirical)
 **Question answered (2026-06-20, measured via the CCDUMP harness above, not inferred):**
@@ -107,14 +116,26 @@ What remains of the modified-flag fix: ONLY the legacy explicit-MVR-ON migration
 run 2 showed is one-time/idempotent — so it shrinks to at most "don't silently rewrite legacy
 ON text on first load," possibly moot entirely if the default flips to OFF.
 
-**One thing NOT yet empirically confirmed (the "should-be-no-op, wasn't" risk — do NOT take
-on faith):** that `compensateMirrorFlip`, reading an UN-re-oriented rotation (because
-correctReadability was gated), still positions mirrored/flipped text correctly on load. The
-applyMirrorFlip comment (element.cpp:1074-1075) orders compensate AFTER correctReadability "so
-it reads the corrected rotation/pos" — that ordering assumes the correction changed something.
-CHECK before committing to the reframe: gate the flip in a throwaway build, load a mirrored
-file via the CCDUMP harness, confirm text position is still right. This is the decision input,
-not a green light.
+**The "should-be-no-op, wasn't" risk — NOW EMPIRICALLY CONFIRMED CLEAR (2026-06-21).**
+Tested exactly as planned: env-gated `correctReadability` to a no-op (`QET_GATE_READABILITY=1`),
+loaded `prefix_mirrorflip_test.qet`, logged each text's `sceneBoundingRect` + scene center,
+active vs gated (`ccdump-active.log` / `ccdump-gated.log`). Discriminator: a 180°-about-own-center
+rotation maps an axis-aligned rect onto itself, so if compensate is placement-correct at BOTH the
+raw and corrected rotation, the on-screen footprint must be identical between the two runs.
+- **Case "5volt" (flip, MVR-off, inverted — the tier-3 default case):** active `sceneRect`
+  `(507.297,72.5 26.70×17)` rot180 pos(32.7,−10.5); gated `sceneRect` **identical**
+  `(507.297,72.5 26.70×17)` rot0 pos(6,−27.5); scene center identical (520.648,81). Same region,
+  only the glyph orientation flips. ⇒ `compensateMirrorFlip` reads the UN-re-oriented rotation and
+  STILL places the text correctly. The applyMirrorFlip ordering comment is a convenience, not a
+  correctness dependency. **No hidden coupling.**
+- **Case "12" (net 0):** footprint byte-identical both runs (both no-op) — sanity anchor.
+- **Case "10K" (mirror, MVR-on):** footprint differs (tall↔wide, the −net de-rotation) but scene
+  center identical — MVR-ON forcing acting as designed, not the tier-3 path.
+- **Bonus:** in the gated run WOULD-SAVE == stored XML for all three (rotation/x/y unchanged) ⇒
+  gating `correctReadability` ALSO eliminates the silent rewrite at the root, confirming Q2: the
+  ENTIRE orientation rewrite is from correctReadability/rotateAboutOwnCenter, none from geometry.
+**Decision input resolved: the reframe is geometrically sound — GO.** (Still a decision not yet
+made/requested — no implementation taken. Awaiting explicit green light before any code change.)
 
 ### Rotated-element text readability — LAYER 2 (de-rotation + layout)  · COMMITTED (6f8dd772c, [WIP]) — Phenomenon B FIXED, residual WIP = correction-trigger lag
 **Status (Jun 2026):** classifier gate-1 PASSED (logical-state parity/theta reproduces the 24-cell table); orientation correction built and gates α (layer-1 regression clean), β (no rotation drift; OFF confirmed forward-acting — orientation PASS), γ (24-cell orientation+position+save/reload) all PASS. Position fix for the grouped+flip ~group-height displacement committed separately as b0a405329. Orientation correction committed as 6f8dd772c, flagged [WIP] at the time pending Phenomenon B (below).
