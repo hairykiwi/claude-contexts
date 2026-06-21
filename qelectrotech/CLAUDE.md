@@ -87,12 +87,25 @@ Touch only what the task requires:
 
 **Nomenclature: no internal shorthand in upstream-facing text**
 Session-local terms (layer-1/2, MVR, gate-1/2/α/β/γ, "phenomenon X", architecture
-labels like "A'") are working shorthand for chat/CC-TASKS.md/fix-metrics.md ONLY.
+labels like "A'") are working shorthand for chat/CC-TASKS.md ONLY.
 They must never appear in source comments, @briefs, or commit messages — those are
 read by Laurent and upstream, who have no context for them. Describe the actual
 mechanism instead (what the code does, which function, which commit hash). Sweep
 the whole diff for this before presenting it, not just the line being discussed —
 caught 3 times in one session by only fixing the line that was pointed out.
+
+**Spelling consistency (English variants)**
+QET is an international project; perfect consistency across the whole codebase
+isn't realistic and isn't the goal — don't drive-by-fix unrelated pre-existing
+spelling elsewhere in a file as part of an unrelated change. For any NEW text you
+write — code comments, @briefs, commit messages, new identifiers — match Qt's own
+spelling conventions wherever you're naming or referencing parameters, identifiers,
+classes, or methods; otherwise match whatever convention the immediate surrounding
+file already uses where one is established. If you hit a genuine inconsistency you
+can't resolve by matching adjacent style — conflicting conventions in the same area,
+or a case this rule doesn't cover — flag it explicitly rather than silently picking
+one; User will decide whether it needs a rule here, a tracked CC-TASKS.md item,
+or no action.
 
 **Commit message/comment text must match the tree AT THAT COMMIT**
 When a single piece of work spans multiple commits (e.g. a rename landing in a
@@ -157,38 +170,6 @@ must perform a brief functional test relevant to the change:
 
 This applies to all source code commits. CMake, documentation, and
 tooling-only commits may be pushed without a functional test at discretion.
-
-## Fix metrics logging
-For each source code fix, append an entry to:
-  ~/claude-contexts/qelectrotech/fix-metrics.md
-
-Do NOT include metrics in commit messages — they are personal development
-records, not upstream history.
-
-Each entry format:
-  ## <commit hash> — <commit subject>
-  Token cost: ~ | Tool calls:  | Graph queries:  | First attempt:
-
-Example:
-  ## 269ab1dd3 — Add folio-level Mirror/Flip for placed elements
-  Token cost: ~180k | Tool calls: 30 | Graph queries: 1 | First attempt: PASS
-
-Honesty requirement: metrics must be observed, never guessed. Record
-`First attempt` truthfully (e.g. "No — N iterations" when corrected within
-session, not PASS). When a counter is not introspectable (e.g. tool-call
-count or token cost not visible this session), write `not captured` rather
-than estimating a number. A blank or honest "not captured" is always
-preferred over a fabricated figure.
-
-Purpose: quantify Claude Code / Understand-Anything's contribution to fix
-efficiency over time. Personal record — not for upstream.
-
-First attempt notation:
-    PASS = correct first time
-    FAIL→PASS = corrected within session
-    FAIL→FAIL→PASS = multiple corrections (extend as needed)
-    PASS (untested) = compiled but not functionally verified
-    PARTIAL = some call sites fixed, others deferred
 
 ## Project overview
 QElectroTech (QET) is an open source Qt/C++ EDA tool for industrial
