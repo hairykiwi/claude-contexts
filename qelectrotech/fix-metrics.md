@@ -180,3 +180,17 @@ SETTLED phase that empirically killed the QParallelAnimationGroup race question.
 "measure, don't hypothesise" rule earned its keep — the second gap would have been
 guessed wrong (I'd hypothesised a parity-classifier miss; the dump showed parity/net
 correct and the issue was the absent compensate trigger).
+
+## 207d3cc5b — Stop re-orienting element text when keep-visual-rotation is off
+Token cost: not captured | Tool calls: not captured | Graph queries: 0 (read live tree only; no /understand this session) | First attempt: code PASS (correct first build, tests 1–4 PASS) / commit message FAIL→PASS (one reviewer round before commit flagged two distinct wording defects, both fixed in that single revision: a net/net_raw removed-vs-retained contradiction, and a British "centre"→"center" — code unchanged by either)
+Removal, not gating: deleted correctReadability's keep-visual-rotation-OFF
+inverted→readable 180° actuator so OFF text now free-rotates to its literal set
+angle. Prior scoping (CCDUMP harness, env-gated no-op run) had already MEASURED that
+compensateMirrorFlip places correctly off the raw rotation (case "5volt": identical
+sceneRect gated vs active) and that rotateAboutOwnCenter is reachable only from inside
+correctReadability — so removal kills the silent orientation rewrite at the root with no
+geometry change. Read-the-function-first caught that the task premise ("MVR-ON still
+needs the snapped net") was imprecise: ON uses net_raw; the snapped net AND parity were
+exclusively OFF-branch, so both were dead after removal (removed, no -Wunused). That same
+distinction was the commit-message contradiction the reviewer flagged. Clean build, no
+warnings, fast-forward push (no force).
