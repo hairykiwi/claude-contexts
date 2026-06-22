@@ -340,6 +340,33 @@ plain reconfigure will do.
   `ls /tmp/ | grep -i qet` and `ps aux | grep -i qelectrotech`
 - Reboot is the reliable fix until SingleApplication is replaced or
   binary is properly notarized
+
+**QET process launch/exit protocol for CC — PROVISIONAL, first live trial
+pending.** Supersedes any prior CC-internal note about always handing QET
+launch to User. After an earlier incident (CC launched and force-killed the
+app, likely contributing to the SingleApplication crash above), this protocol
+is being trialed instead of an outright "CC never launches it" rule. Until a
+trial run has actually confirmed it works reliably, treat it as unproven —
+don't assume it's settled practice.
+- CC MAY launch the QET binary itself (backgrounded, output captured to a
+  log file) to gather data from a running session.
+- CC MUST NEVER send the process any termination signal, for any reason —
+  not `kill`, not `pkill`, not even a "gentle" SIGTERM. A clean shutdown
+  through the app's own Quit path is the only termination method known not
+  to risk SingleApplication corruption; CC has no way to trigger that path
+  itself, so it must not attempt termination at all.
+- Before any test run: commit/push anything in flight and verify it landed
+  (don't just assume a commit succeeded), and check for a lingering stale
+  process from a previous session (`ps aux | grep qelectrotech`) before
+  launching fresh.
+- CC signals explicitly when it's done gathering data and ready for User to
+  quit — an unambiguous handoff, not implied. User then quits via the normal
+  GUI path. CC's only remaining job is to poll for the process actually
+  exiting, never to help end it.
+- If the process disappears before that explicit handoff — treat it as an
+  unplanned crash, report it as such, and check whether a reboot is needed
+  before any relaunch attempt.
+
 - WARNING: After any `brew upgrade extra-cmake-modules`, re-apply the
   if(NOT TARGET ...) guards to:
   `/opt/homebrew/share/ECM/modules/ECMGenerateQDoc.cmake`
