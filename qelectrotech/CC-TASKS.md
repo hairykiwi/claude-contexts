@@ -16,6 +16,67 @@ orientation and future-fix insight. Don't duplicate diffs here; do keep reasonin
 
 ## ACTIVE
 
+### Sync master's .gitignore to canonical fork content (resolves Findings 1 & 2 below)  · DONE (pushed) · branch master
+**What:** deliberate decision (not a conflict-driven default) to bring master's `.gitignore` to
+byte-exact parity with `qt6_cmake_joshua` HEAD (the b537842 14-line gold standard). Commit
+`3f26d2cc0` on master: fixed the fork-only concatenated `!doc/doc-utilsbuild/` line back to the
+canonical `!doc/doc-utils` (real upstream has these as two clean separate lines — fork-only defect,
+not attributable upstream), and added the three entries master still lacked: `build_qt6/`,
+`.DS_Store`, `CLAUDE.md`. Resolves Finding 1 (parity) and Finding 2 (concatenated line) below.
+**Verified via fresh, explicitly-scoped clones — NOT a fetch into an existing clone** (an ambiguous-
+refspec fetch gave a FALSE "still missing" reading earlier this session, caught before acting):
+one `git clone --branch <br> --single-branch --depth 1` per branch, read the file, diff vs the
+qt6_cmake_joshua gold reference. master (tip `3f26d2c`), mirror-flip-rotate (`39b502c`),
+folio-mirror-flip (`f32706b`) ALL byte-identical to gold (14 lines). fix-grouped-text-rotation-pivot
+left out of scope, untouched. main.cpp build-enabler stashed across the switch and restored unstaged.
+
+### Propagate two build/housekeeping fixes across fork branches  · DONE (pushed) · branches mirror-flip-rotate, master, folio-mirror-flip
+**What:** replicated two already-decided+verified commits from `qt6_cmake_joshua` onto the
+other live branches — `e342213d4` (CMake: guard Linux-only install rules in
+`if(UNIX AND NOT APPLE)`, Laurent's fix from real upstream) and `b537842ac`
+(.gitignore: exclude CC-TASKS.md + debug-logs/). Mechanical replication, not new judgment.
+**Per-branch outcome (all verified against the actual remote after push — hash + file content,
+not just local "push succeeded"):**
+- **mirror-flip-rotate** → fixed+pushed, tip `39b502ce3` (`4ed901169` CMake, `39b502ce3` gitignore).
+  Both cherry-picks applied CLEANLY — branch's pre-images were byte-identical to the commits' parents.
+- **master** → fixed+pushed, tip `a0bb8a7ae` (`a2ffddb31` CMake, `a0bb8a7ae` gitignore). CMake
+  cherry-pick CONFLICTED (master's install block lacked the `if(NOT QMFILES_AS_RESOURCE)` wrapper +
+  had extra blank lines); resolved by taking the incoming canonical guarded block verbatim. gitignore
+  cherry-pick also CONFLICTED (see Finding 1) → resolved per user decision to add ONLY the two intended
+  lines. gitignore commit message AMENDED on master: original body claimed "CLAUDE.md was already
+  excluded", which is false on master (CLAUDE.md is untracked + not gitignored here) — reworded to be
+  accurate to master's tree per the "message must match the tree at that commit" rule.
+- **folio-mirror-flip** → fixed+pushed, tip `f32706b64` (`fa2caae7c` CMake, `f32706b64` gitignore).
+  Both applied CLEANLY; original b537842 message kept verbatim (accurate here — this branch's
+  .gitignore already had CLAUDE.md).
+- **fix-grouped-text-rotation-pivot** → SKIPPED (retired/superseded branch, not actively developed).
+  Confirmed state: neither fix present; CMakeLists.txt in the ORIGINAL UNGUARDED form (the
+  qelectrotech.xml / appdata.xml install lines are LIVE+uncommented, not the commented-out workaround
+  the other branches carried); .gitignore has neither CC-TASKS.md nor debug-logs/. Left untouched.
+**main.cpp discipline held throughout:** stashed the local app-name build-enabler before branch
+switches, restored it unstaged onto qt6_cmake_joshua afterward (`git restore --source=stash@{0}`,
+never `git checkout <ref> --` which auto-stages); main.cpp never appeared staged on any branch.
+
+#### Finding 1 — master's .gitignore diverges structurally from the qt6 lineage  · RESOLVED (3f26d2cc0)
+master's `.gitignore` does NOT contain `CLAUDE.md`, `.DS_Store`, or `build_qt6/` — entries the
+qt6_cmake_joshua lineage (which b537842 was based on) does have. That's WHY b537842 conflicted on
+master rather than applying clean. Per decision, this pass added ONLY `debug-logs/` + `CC-TASKS.md`
+to master and did NOT import the other three — whether master SHOULD also gitignore
+CLAUDE.md/.DS_Store/build_qt6 is a separate, undecided question, not to be resolved implicitly as a
+side-effect of this propagation. Parked for a deliberate decision.
+→ Resolved by `3f26d2cc0`: that deliberate decision was subsequently made — master synced to full
+byte-exact gold-standard parity (CLAUDE.md/.DS_Store/build_qt6 added). See top entry.
+
+#### Finding 2 — broken concatenated line in master's .gitignore: `!doc/doc-utilsbuild/`  · RESOLVED (3f26d2cc0)
+master's `.gitignore` line 9 reads `!doc/doc-utilsbuild/` — looks like a pre-existing defect where
+`!doc/doc-utils` and a `build/` (or similar) entry got mashed into one line. Pre-existing on master,
+found incidentally during this propagation pass; NOT introduced here and deliberately left untouched
+to keep the gitignore commit narrowly about the two intended lines. Needs its own scoped fix later
+(decide intended split: almost certainly `!doc/doc-utils` on its own line, plus whatever the trailing
+`build/` was meant to be).
+→ Resolved by `3f26d2cc0`: line corrected to canonical `!doc/doc-utils`, with `build_qt6/` restored
+as its own separate line (the gold-standard split). See top entry.
+
 ### Remove MVR-OFF readability forcing — free rotation is the new default  · COMMITTED (207d3cc5b, pushed) · branch mirror-flip-rotate
 **What changed (sources/qetgraphicsitem/element.cpp):** `correctReadability` no longer
 re-orients text when keep_visual_rotation is OFF. The OFF-branch 180° inverted→readable actuator
