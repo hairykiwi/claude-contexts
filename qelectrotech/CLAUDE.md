@@ -294,18 +294,29 @@ next to the binary in build_qt6/ instead of the install path.
 - Once PR #1 (build fixes) is prepared as a clean branch, THAT branch becomes
   the canonical recovery source instead of cherry-picking individual files.
 
-## Context files (CLAUDE.md + CC-TASKS.md) management
-Both files live in a separate repo: ~/claude-contexts/qelectrotech/
-They are symlinked into the QET project root so CC reads them in-place:
+## Context files (CLAUDE.md + CC-TASKS.md) accessibility and management
+
+**Context file accessibility**
+Claude Code has direct filesystem access to ~/claude-contexts — there's no
+need to go through the symlinks below for editing these files. WRITE TO THE
+REAL PATH, NEVER THROUGH THE SYMLINK: some editor tools follow symlinks fine
+for reading but fail to write through one.
+- Both files live in a separate repo: ~/claude-contexts/qelectrotech/
+- QET-repo-side symlinks exist only so the build tooling can find the files
+  in-place:
   ln -s ~/claude-contexts/qelectrotech/CLAUDE.md   ~/qelectrotech/CLAUDE.md
   ln -s ~/claude-contexts/qelectrotech/CC-TASKS.md ~/qelectrotech/CC-TASKS.md
-Both are now explicitly listed in QET's .gitignore (CLAUDE.md, CC-TASKS.md) so
-they cannot be accidentally committed into the QET source repo. (HISTORICAL NOTE:
-before 2026-06-15 neither was actually gitignored despite a prior claim here —
-they were kept out of commits only by `git add <named files>` discipline; now the
-.gitignore protection is real, verified via `git check-ignore -v`.) The symlinks
-are per-clone (not committed) — recreate BOTH after any fresh clone of the QET
-repo. Backed up via: github.com/hairykiwi/claude-contexts
+- The symlinks are per-clone (not committed) — recreate BOTH after any fresh
+  clone of the QET repo. Backed up via: github.com/hairykiwi/claude-contexts
+
+**Context file management**
+- CC-TASKS.md is typically updated by Claude Code directly, after its own
+  code commits or investigation findings.
+- CLAUDE.md is typically updated by User, working in conjunction with
+  Claude chat.
+
+Both files are explicitly listed in QET's .gitignore so they cannot be
+accidentally committed into the QET source repo.
 
 ## Dev build setup (after a clean reconfigure / wipe)
 Set B (cmake path fix) makes a Debug build look for `elements/`,
