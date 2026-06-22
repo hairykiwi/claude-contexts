@@ -151,6 +151,14 @@ Write all instrumentation/debug logs to ~/qelectrotech/debug-logs/ (gitignored)
 with descriptive names, e.g. `qet 2>debug-logs/<feature>-<purpose>.log`.
 Not /tmp (purged on reboot, hidden from Finder). CC reads its own output from
 there; recreate the dir after a fresh clone (it's gitignored, so not tracked).
+
+For mixed human/CC test sessions specifically (CC launches/logs, User drives
+the GUI): CC names the test/log at the HEAD of the test schedule it generates
+— that name is the anchor. If User ends up saving a .qet file as part of the
+test, save it under that SAME name (swap extension only) rather than CC
+trying to match a filename after the fact. CC usually can't name-match a test
+file in advance anyway, since the file frequently doesn't exist yet at launch
+time — it gets created fresh during the session.
   
 ## Testing requirements
 Before pushing any commit to origin, Claude must propose and the developer
@@ -341,13 +349,14 @@ plain reconfigure will do.
 - Reboot is the reliable fix until SingleApplication is replaced or
   binary is properly notarized
 
-**QET process launch/exit protocol for CC — PROVISIONAL, first live trial
-pending.** Supersedes any prior CC-internal note about always handing QET
-launch to User. After an earlier incident (CC launched and force-killed the
-app, likely contributing to the SingleApplication crash above), this protocol
-is being trialed instead of an outright "CC never launches it" rule. Until a
-trial run has actually confirmed it works reliably, treat it as unproven —
-don't assume it's settled practice.
+**QET process launch/exit protocol for CC — CORE MECHANICS CONFIRMED (first
+trial, 2026-06-22); two refinements added below from that trial.** Supersedes
+any prior CC-internal note about always handing QET launch to User. After an
+earlier incident (CC launched and force-killed the app, likely contributing
+to the SingleApplication crash above), this protocol was trialed instead of
+an outright "CC never launches it" rule. The launch/handoff/exit-poll
+mechanics themselves worked cleanly both directions, no premature exit, no
+stale-process surprises — that part is confirmed, not provisional anymore.
 - CC MAY launch the QET binary itself (backgrounded, output captured to a
   log file) to gather data from a running session.
 - CC MUST NEVER send the process any termination signal, for any reason —
@@ -359,6 +368,10 @@ don't assume it's settled practice.
   (don't just assume a commit succeeded), and check for a lingering stale
   process from a previous session (`ps aux | grep qelectrotech`) before
   launching fresh.
+- While waiting for User's handoff signal, CC may periodically re-read
+  (tail) the log file rather than only reading it once at the end — lets
+  instrumentation output get digested as it's produced, not cold all at once
+  after the fact.
 - CC signals explicitly when it's done gathering data and ready for User to
   quit — an unambiguous handoff, not implied. User then quits via the normal
   GUI path. CC's only remaining job is to poll for the process actually
@@ -366,6 +379,11 @@ don't assume it's settled practice.
 - If the process disappears before that explicit handoff — treat it as an
   unplanned crash, report it as such, and check whether a reboot is needed
   before any relaunch attempt.
+- CC has NO visual/GUI access in this workflow — backgrounded process, log
+  file only. Don't ask CC to report on anything that can only be judged
+  visually (e.g. how an animation looks); that has to come from whoever's
+  actually watching the screen, or from frame-by-frame instrumentation that
+  doesn't depend on visual judgment at all.
 
 - WARNING: After any `brew upgrade extra-cmake-modules`, re-apply the
   if(NOT TARGET ...) guards to:
