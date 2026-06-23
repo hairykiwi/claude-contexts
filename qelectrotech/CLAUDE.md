@@ -70,6 +70,11 @@
   into a source commit. Never stage .understand-anything/intermediate/ or
   diff-overlay.json (local scratch; keep gitignored). Graph is fork-only —
   exclude from any upstream PR.
+- The graph predates recent commits and must always be treated as a map only,
+  verified against the live tree — this is already the standing rule, FOLLOW
+  IT SILENTLY. Don't restate "treating the graph as stale / verifying against
+  live tree" as a sentence in every report that uses it; that's noise once
+  it's a default, not new information each time.
 
 ## Coding guidelines
 **Highlight ambiguity before coding**
@@ -334,11 +339,20 @@ for reading but fail to write through one.
 - The symlinks are per-clone (not committed) — recreate BOTH after any fresh
   clone of the QET repo. Backed up via: github.com/hairykiwi/claude-contexts
 
-**Context file management**
-- CC-TASKS.md is typically updated by Claude Code directly, after its own
-  code commits or investigation findings.
-- CLAUDE.md is typically updated by User, working in conjunction with
-  Claude chat.
+**Context file management — division of labour (explicit, this is the default)**
+**CC-TASKS.md: CC's to maintain, commit, and push by default —
+  confirmation gates the push, not the commit.** After CC's own code commits or
+  investigation findings, update CC-TASKS.md and commit it locally with a drafted
+  message. Push only after User confirms — the commit itself doesn't wait.
+  CC-TASKS.md is a personal working record in a separate repo, not upstream-facing,
+  low cost to be wrong and easy to correct.
+- **CLAUDE.md: User's file, maintained working in conjunction with Claude
+  chat.** CC must NOT edit or push CLAUDE.md directly, ever, by default.
+- **Exceptions to either default must be stated explicitly, in the moment,
+  by User — never inferred or assumed by CC.** If User wants a specific
+  CC-TASKS.md push held back, or wants CC to make a specific CLAUDE.md edit
+  directly, User will say so plainly for that instance. Don't generalize a one-off
+  instruction into a new standing default either direction.
 
 Both files are explicitly listed in QET's .gitignore so they cannot be
 accidentally committed into the QET source repo.
