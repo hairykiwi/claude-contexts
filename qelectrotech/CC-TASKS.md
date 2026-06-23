@@ -83,6 +83,9 @@ with geometric mirror.qet") but never logged as its own defect — now confirmed
 distinct from that (since-fixed) panel crash.
 **Class:** missing-trigger family — the text-creation path doesn't fire `correctReadability` /
 `compensateMirrorFlip`; only element-level events do. Scope with the toggle gap above.
+**Shared gap (cross-ref 2026-06-24):** this same `addDynamicTextItem`-misses-`compensateMirrorFlip` hole also
+produces the geometric-mirror manifestation of the DEFERRED "Genuine ungroup of a mirrored element…" entry
+(ungroup re-attaches each text via `addDynamicTextItem`). One post-attach compensation hook may close both.
 **Mechanism traced (code, 2026-06-23) — it's the `compensateMirrorFlip` half, NOT readability:**
 `applyMirrorFlip` (element.cpp:1072) applies the reflection as an ELEMENT-level `setTransform(scale(sx,sy))`.
 Dynamic texts are direct child items (`deti->setParentItem(this)`, addDynamicTextItem:1259) with no
@@ -809,20 +812,41 @@ Two reasoning checks run during scoping (both relevant if (a) is ever revisited 
 
 **Commit structure:** 2-commit split — 023070fd8 (pure `compensateMirrorFlip` extract, no behaviour change, verified against an isolated extract-only build so the "verified" claim matches that commit's tree) then 0a734cdc5 (the trigger + compensate-on-own-rotation fix). main.cpp never staged.
 
-### Genuine ungroup of a mirrored element displaces text  · DEFERRED
-**Area:** element text groups · **Branch:** folio-mirror-flip
-**Location:** `Element::removeTextFromGroup` → `elementtextitemgroup.cpp:1367`
-Genuine ungroup of a mirrored element (Properties → Delete-group) displaces
-grouped text ~19px; persists to disk (confirmed via round-trip). Same
-`removeFromGroup`-through-reflection family as the committed save-path fix
-(05bcba506) — likely the same shape of fix: re-express child geometry in one
-mirror-free frame instead of relying on the scene-preserving detach.
-**Severity:** low — reachable only via Properties → Delete-group; no
-right-click ungroup gesture exists.
-**Related (separate, not a dependency):** shares the ungroup/`removeFromGroup` path with the LAYER 2 readability entry. Distinct concern (this = mirror geometry to disk; that = rotation orientation display). Whoever codes the second of the two must verify it doesn't regress the first in the shared function. (This is the smaller, known-shape fix — cf. 05bcba506 — so it's a low-risk standalone session whenever convenient; no strict ordering required.)
-**Next:** own scoped session; read 1367 path, confirm same-shape vs trickier
-(it touches the shared removeFromGroup that's *correct* for unmirrored ungroup),
-write fix + verification matrix before implementing.
+### Genuine ungroup of a mirrored element displaces text / renders it geometrically mirrored  · DEFERRED
+**Area:** element text groups · **Branch:** folio-mirror-flip (repro also on mirror-flip-rotate)
+**Location (current line numbers):** `Element::removeTextFromGroup` (element.cpp:1451) →
+`ElementTextItemGroup::removeFromGroup` (elementtextitemgroup.cpp:111, which `resetTransform()` :119 +
+`setRotation(group rotation)` :120) → `Element::addDynamicTextItem` (element.cpp:1259). (Old "1367" ref was stale.)
+**Symptoms (two coupled manifestations of one ungroup-through-reflection defect):**
+- (orig) Genuine ungroup of a mirrored element (Properties → Delete-group) displaces grouped text ~19px;
+  persists to disk (confirmed via round-trip).
+- (new, 2026-06-24) With ROTATED grouped text, ungroup keeps the overall rotation/placement but renders the
+  text GEOMETRICALLY MIRRORED with 2 of 3 lines OVERLAPPING — i.e. unreadable, materially worse than a ~19px nudge.
+**Root cause — SAME family, traced from code (cross-check 2026-06-24):** the ungroup path detaches each text and
+re-attaches it via `addDynamicTextItem`, which (as found for the "New text on an already-mirrored/flipped element"
+OPEN entry) does NOT re-apply `compensateMirrorFlip` nor `correctTextReadability`. So each now-individual text becomes
+a direct child of the still-reflected element (`applyMirrorFlip`'s element-level `setTransform(scale)`), inheriting
+the reflection with an identity local transform ⇒ the geometric mirror; `removeFromGroup`'s `resetTransform()` +
+`setRotation` leaves the per-text geometry in the group's baked/reflected frame rather than the clean mirror-free
+"design" frame ⇒ the ~19px positional residual + line overlap. Same `removeFromGroup`-through-reflection family as the
+committed save-path fix (05bcba506). **Shared gap with the create-text OPEN entry:** both flow through
+`addDynamicTextItem` missing the post-attach `compensateMirrorFlip` — the geometric-mirror manifestation here IS that
+live gap; the persisted ~19px is the additional `removeFromGroup`-baking issue.
+**UNMEASURED (needs a GUI round-trip, not guessed):** whether the NEW geometric-mirror/overlap manifestation persists
+to disk or self-heals on reload. By code, the live mirror should self-heal on reload (`fromXml`→`applyMirrorFlip`
+re-applies `compensateMirrorFlip` across `m_dynamic_text_list`), while the ~19px positional was confirmed to persist —
+so the two effects may decouple under save/reload. Confirm before sizing the fix.
+**Severity:** RAISED low → MEDIUM — the new manifestation yields unreadable, overlapping text (not a minor ~19px
+nudge). Still reachable only via Properties → Delete-group; no right-click ungroup gesture exists, which caps exposure.
+**Likely fix shape:** re-express the detached child geometry in one mirror-free frame and re-apply
+`compensateMirrorFlip` (+ `correctTextReadability`) after `addDynamicTextItem`, instead of relying on the
+scene-preserving detach. A single add-text/reattach compensation hook may close this AND the create-text OPEN entry.
+**Related (separate, not a dependency):** shares the ungroup/`removeFromGroup` path with the LAYER 2 readability entry.
+Distinct concern (this = mirror geometry; that = rotation orientation display). Whoever codes second must not regress
+the first in the shared function.
+**Next:** own scoped session; FIRST measure the save/reload behaviour of the new manifestation (above), then confirm
+same-shape vs trickier (it touches the shared `removeFromGroup` that's *correct* for unmirrored ungroup), write fix +
+verification matrix before implementing. NOTE: explicitly logged as future work — not today's task.
 
 ### Grouped text at non-cardinal angles: offset overridden on ungroup/regroup  · DEFERRED (edge case)
 **Area:** element text rotation/readability · **Branch:** mirror-flip-rotate
