@@ -182,7 +182,7 @@ ACTIVE entry below ("Elements-panel crash on project open"). The 7 latent elemen
 Both are kept as SEPARATE entries by decision; shared origin commit is not a reason to merge their tracking.
 **Severity:** medium — data-safe (.qet reloads fine once past it) but a hard crash.
 
-### Elements-panel crash on project open — setCurrentItem(child(0)) in ElementsPanel::addProject  · ACTIVE — INVESTIGATED 2026-06-23 (leading hypothesis REFUTED; NOT reproduced); BANKED, defensive-guard fix pending · branch mirror-flip-rotate
+### Elements-panel crash on project open — setCurrentItem(child(0)) in ElementsPanel::addProject  · DEFENSIVE GUARD COMMITTED (917c01da9, pushed); underlying race UNCONFIRMED, investigation BANKED · branch mirror-flip-rotate
 **Area:** UI / elements panel · **Priority: HIGHER than the (now-RESOLVED) activation crash above** — triggered by
 File ▸ Open, a core/frequent action, vs the narrower project-view-activation trigger. **Pre-existing upstream**
 (origin commit a82f6de23 "Add highlight current page in ProjectView", same commit as the activation crash, but a
@@ -235,11 +235,15 @@ address reuse). **CRASH NOT REPRODUCED in any run.** Instrumentation reverted (t
 **STATUS: BANKED** (investigation paused, not reproduced; chasing further has diminishing returns). Resume with the
 freed-pointer race in mind: instrument `currentItem()` / old-current validity and target a close-all-then-open sequence.
 
-**FIX DIRECTION (separate task; justified by this data even without a deterministic repro):** a cheap defensive
-guard — skip `setCurrentItem(qtwi_project->child(0))` when `qtwi_project->treeWidget() == nullptr` (item not actually
-attached to the model). Sidesteps the crash AND fixes the genuine detached-insert defect (the
-`insertChild(indexOfTopLevelItem(common_tbt_collection_item_), …)` degrading to `insertChild(-1)` when common_tbt is
-unset). Low-risk. Still investigation-only — no guard committed yet.
+**FIX — defensive guard COMMITTED 917c01da9 (2026-06-23, pushed).** elementspanel.cpp addProject first_add branch:
+the auto-select (`setCurrentItem(qtwi_project->child(0))` + `child(0)->setSelected(true)`) now runs only when
+`qtwi_project->treeWidget() != nullptr` (item actually attached to the model). When it skips, reload() re-adds the
+project attached and performs the selection, so the settled UI is unchanged (verified: startup arg-open, button-Open,
+double-click-while-running all PASS, no regression). This makes the unsafe setCurrentItem-on-not-in-model call
+impossible at this site. NOTE it is DEFENSIVE: the detached state alone was proven NOT to crash, so the guard does
+not "fix the race" — it removes the unsafe call that the rare freed-pointer race would have detonated through. The
+guard's protective effect on the actual crash is LATENT (can't trigger on demand) — absence-confirmed, not
+demonstrated. Underlying race remains unconfirmed; investigation stays BANKED (resume notes above).
 **Severity:** high — File ▸ Open is a core action; intermittent hard crash on project open (rare; not reproducible on demand as of 2026-06-23).
 
 ### Elements-panel: 7 F3–F9 move sites still use getItemForDiagram get-or-create (preventive hardening)  · ACTIVE — not started · branch mirror-flip-rotate
