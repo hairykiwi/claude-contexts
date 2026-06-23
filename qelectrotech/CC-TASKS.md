@@ -16,6 +16,226 @@ orientation and future-fix insight. Don't duplicate diffs here; do keep reasonin
 
 ## ACTIVE
 
+### Make Dialog-rotate (RotateTextsCommand) fully synchronous — drop the animation  · COMMITTED (3025d380f, pushed) · branch mirror-flip-rotate
+**Landed 2026-06-22 as `3025d380f` "Rotate texts via the orientation dialog synchronously"** (push
+`39b502ce3..3025d380f`, fast-forward). Two named files only (rotatetextscommand.cpp + .h); main.cpp
+never staged. Post-commit `cmake ..` reconfigure (GitRevision refresh) + `make -j8` clean; dev paths
+verified relative-to-binary. T1–T4,T6 + T5-drift PASS; T5's crash is the SEPARATE pre-existing
+elements-panel UAF (own OPEN entry below), not this change. No fix-metrics entry (requirement removed
+from CLAUDE.md this session; metrics never went in commit messages anyway).
+**Decision (User, 2026-06-22):** the "Choose text orientation" dialog path should be
+**instant**, exactly like the R90° quick-rotate (`RotateSelectionCommand`) — NOT animated.
+This **supersedes** the earlier arc-interpolator investigation idea (reshape the tween curve);
+that plan is dropped. Founding observation: text visibly deviated off-path during the dialog
+animation (both forward and undo), settling correctly only at the endpoints. Root cause was
+confirmed analytically (no instrumentation needed): two independent linearly-interpolated
+`QPropertyAnimation`s ("rotation" + "pos") in one `QParallelAnimationGroup` — a straight-line
+`pos` interpolation can't trace the circular arc that true center-pivot rotation needs, so only
+the two endpoints are geometrically exact (worst at 180°: full half-bbox swing mid-tween).
+R90° never showed it because its directly-selected text/group branches are already synchronous
+(`QPropertyUndoCommand`, "stay synchronous" note at rotateselectioncommand.cpp:101).
+
+**Implemented (NOT yet committed, NOT yet tested — User rebooting first):**
+- `sources/undocommand/rotatetextscommand.{h,cpp}`. Removed the `QParallelAnimationGroup`, both
+  `QPropertyAnimation`s, `setupAnimation()`, the `finished()`→correction connect, and the
+  `m_anim_group` member — **fully deleted, no dead code/comment-out** (recoverable via git).
+- Constructor now creates, per text and per group, two **synchronous** `QPropertyUndoCommand`
+  children parented to `this` ("rotation" cur→`m_rotation`; "pos" cur→`centerPivotEndPos(item,
+  m_rotation)`). `QPropertyUndoCommand` defaults `m_animate=false` → synchronous, so no
+  `setAnimated` call needed. `centerPivotEndPos` / endpoint math **unchanged** — just called
+  synchronously now. Multi-selection preserved (both loops; all children atomic under one command).
+- `redo()`/`undo()` now call `QUndoCommand::redo()/undo()` (drive children) → conductor-text
+  `forceMovedByUser` bookkeeping (unchanged) → `correctSelectedTexts()`. Mirrors
+  `RotateSelectionCommand`'s exact placement: correction runs on BOTH redo and undo, reading the
+  settled rotation (undo MUST re-run it — `compensateMirrorFlip` sets an absolute transform the
+  pos/rotation reversal doesn't restore).
+- `finalizeReadability()` → renamed `correctSelectedTexts()` (old "animation has settled" wording
+  was untrue-to-tree).
+- **NEW guard `if(isObsolete()) return;`** after `openDialog()`. Necessary because geometry now
+  applies synchronously in `redo()`: a cancelled dialog must create no child commands, else cancel
+  could apply an instant jump-to-`m_rotation` (and, since the command is then discarded as obsolete,
+  leave it un-undoable). `QUndoStack::push` semantics on a pre-obsolete command couldn't be verified
+  from headers (no .cpp shipped with Homebrew Qt), so the guard makes cancel a guaranteed no-op
+  either way. This also closes a latent cancel-path issue the animated version may have had.
+
+**Verified so far:** clean `make -j8`, no warnings from the file; binary relinked (mtime 18:39,
+2026-06-22). `grep` confirms zero animation primitives remain in either file. Diff stat: cpp
++39/-47-ish, h small. clangd panel showed the usual QUndoCommand-not-found cascade (no
+compile_commands.json) — ignored per CLAUDE.md, build log is authoritative.
+
+**PENDING — functional test matrix proposed, User to run AFTER reboot, then report PASS/FAIL.**
+Do NOT commit until it passes. Named files only (`rotatetextscommand.cpp` + `.h`); never main.cpp.
+Test items (❌ = old animated behaviour):
+- **T1 Core:** dialog-rotate 90° → instant snap, no tween/arc, identical feel to R90° (❌ ~300ms
+  eased sweep that visibly deviated off-path).
+- **T2 Undo/redo:** undo → exact original orientation+position+**transform**; redo restores exactly.
+- **T3 Multi-select:** several texts + a group rotated together → all pivot about own bbox center,
+  one atomic undo/redo for the whole set.
+- **T4 ON-MVR:** keep_visual_rotation ON → ends tops-up (correction applied ONCE), correct position,
+  undo exact; repeat under element mirror / flip / mirror+flip, grouped + ungrouped → settles
+  immediately incl. reflected position, no double-apply/ordering surprise now both steps sync.
+- **T5 Phenomenon-B regression:** dialog-rotate 90° then element-rotate ≥2 full laps → no drift,
+  returns to lap-start; save/reload live==reload.
+- **T6 Cancel (new guard):** open dialog on a rotated text → Cancel → text unchanged, no jump, no
+  new undo-stack entry.
+
+**Next on PASS:** propose commit message + staged file list (the two named files), wait for explicit
+approval, commit, then `cmake ..` + `make -j8` (refresh GitRevision), push origin mirror-flip-rotate.
+On FAIL: fix before committing.
+
+#### TEST RESULT (2026-06-22): T1–T4 + T6 PASS, T5 PARTIAL (save/reload CRASH — separate bug)
+T1 (instant, no animation), T2 (undo/redo exact), T3 (multi-select atomic), T4 (ON-MVR no
+double-apply), T6 (cancel = no-op, new guard works) all **PASS**. T5: the no-drift / returns-to-
+lap-start part **passed**; but **saving then reloading a mirror+flip element CRASHES QET on open**.
+Reproduced twice (a save, and a byte-identical-start file saved-as). Test files in debug-logs/:
+`mirror-flip-rotate-test-00.qet` (original, orientation=0, no mirror/flip — loads fine),
+`-02-01.qet` and `-02-02 - FAIL - qet crashed on opening.qet` (both mirror+flip, crash on open),
+`-01-01 - FAIL - qet crashed after subsequent mirror redraws text with geometric mirror.qet`
+(a LIVE crash during a mirror op, flip + orientation=2).
+
+**Data comparison done (xmllint --format + diff, files copied to /tmp; measure-don't-assume):**
+- Crash is **NOT malformed data.** vs original, the only diffs in a crashing file are: the placed
+  `<element>` gains valid `flip="true" mirror="true"` (or `flip="true" orientation="2"`), and the
+  live `<dynamic_elmt_text>` rotations/positions change to well-formed values (e.g. rotation 0→180,
+  x 39→90.1875). No NaN/inf/garbage. So the crash is in **load/redraw LOGIC for mirror+flip, not bad
+  serialized values.** (`dynamic_elmt_text` = live instance text; `dynamic_text` = embedded-definition
+  template — the latter is byte-identical across all 5 files, ruling out the definition.)
+- **Common signature across ALL three crash files:** placed element with `mirror`/`flip` set + exactly
+  one `<texts_group>` + at least one rotated text. Same fragile family as RESOLVED 05bcba506
+  ("grouped rotated text: mirror corrupts on save/reload") and DEFERRED "Genuine ungroup of a mirrored
+  element displaces text". 02-01 (rot270) and 02-02 (rot180) have IDENTICAL element tags; both crash.
+
+**Assessment — almost certainly PRE-EXISTING, NOT caused by the synchronous conversion (verify before
+relying on it):** the change touches only `RotateTextsCommand` (live dialog rotate). The crash is on
+LOAD (`fromXml`→`applyMirrorFlip`→`compensateMirrorFlip`, all UNCHANGED) of a file whose saved values
+are the deterministic result of UNCHANGED correction logic with identical endpoints — so a pre-change
+binary would save the same bytes and crash the same way. The sync change just surfaced it via the T5
+sequence. ⇒ The RotateTextsCommand conversion (T1–T4,T6 pass, T5-drift passes) is sound on its own
+merits; the load crash is a SEPARATE bug to track/fix independently. BUT confirm with a backtrace first.
+
+**ROOT CAUSE FOUND (2026-06-22, from macOS crash reports — DEFINITIVE, not hypothesised).** The earlier
+"mirror+flip load-logic" hypothesis was WRONG; the mirror/flip correlation was coincidental (just the
+test files). macOS had already written `.ips` crash reports for BOTH observed crashes
+(`~/Library/Logs/DiagnosticReports/qelectrotech-2026-06-22-{210628,185251}.ips` = the 21:06 reload crash
+and the 18:52 "live mirror" crash). BOTH have the **identical** backtrace, SIGSEGV / EXC_BAD_ACCESS
+(fault addr 0x24 — small-offset null/freed deref), and **zero** RotateTextsCommand / mirror / flip / text
+frames:
+`QTreeModel::index ← QTreeModel::parent ← QHeaderView::currentChanged ← QItemSelectionModel::setCurrentIndex
+← QTreeWidget::setCurrentItem ← QETDiagramEditor::addProjectView()::$_1 lambda (qetdiagrameditor.cpp:1904)
+← syncElementsPanel ← subWindowActivated ← MDI window activation`.
+Line 1904 = `pa->elementsPanel().setCurrentItem(item)` in the `syncElementsPanel` lambda; `pa`+`item` are
+null-guarded, so the crash is INSIDE Qt — `getItemForDiagram` returned a **stale/dangling QTreeWidgetItem\***
+(elements-panel tree rebuilt by a collection reload — startup log shows "Elements collection reload"), and
+`setCurrentItem` derefs freed memory. **Use-after-free in the elements-panel tree sync, intermittent /
+timing-dependent** (race between panel reload and project-view activation) — which is why it did NOT
+reproduce under lldb (timing perturbed) nor on a clean single-file reboot (collection already settled).
+`git blame` → both sync lambdas are from upstream commit **a82f6de23** "Add highlight current page in
+ProjectView", an ancestor of `upstream/qt6_cmake_joshua` ⇒ **PRE-EXISTING UPSTREAM bug**, not this branch.
+
+**VERDICT: the synchronous RotateTextsCommand conversion is SOUND and unrelated to the crash.** T1–T4,T6
+PASS, T5 drift PASS; T5's "crash" is this separate pre-existing panel UAF. Test gate satisfied. Diagnostic
+method that worked: got the actual backtrace (macOS .ips reports persist across reboot — no debugger needed
+for an unattached crash) instead of guessing from the file content. The unattached fresh-reload retest was
+rendered UNNECESSARY by the existing reports. CONVERSION CLEARED TO COMMIT (named files only:
+rotatetextscommand.cpp + .h; main.cpp never staged).
+
+### Elements-panel crash highlighting current page (orphan-item, NOT use-after-free)  · RESOLVED (ad69d989b, pushed) · branch mirror-flip-rotate
+**Area:** UI / elements panel · **Branch:** fix lands on mirror-flip-rotate (pre-existing upstream bug, a82f6de23
+"Add highlight current page in ProjectView", ancestor of qt6_cmake_joshua; cherry-pick to a clean upstream PR
+branch later). **Plan file:** `~/.claude/plans/review-claude-md-cc-tasks-md-ancient-globe.md`.
+**Crash:** intermittent SIGSEGV (EXC_BAD_ACCESS, fault 0x24) at `qetdiagrameditor.cpp:1904`,
+`setCurrentItem(item)` in the `syncElementsPanel` lambda (sibling `diagramActivated` lambda at :1892 same
+shape). Both 2026-06-22 crash reports share stack `QTreeModel::index ← parent ← setCurrentItem ← lambda`.
+
+**ROOT CAUSE — refined by reading the code (supersedes the earlier "use-after-free" framing; the dangling-
+pointer hypothesis was from the backtrace alone and is WRONG).** Not freed memory: `GenericPanel::deleteItem`
+calls `unregisterItem` BEFORE `delete` (genericpanel.cpp:907), so `diagrams_` holds no stale entries, and no
+free-without-unregister path exists. Actual mechanism: `getItemForDiagram` (genericpanel.cpp:315) is a
+GET-OR-CREATE helper — on a cache miss it calls `makeItem(QET::Diagram)` → `new QTreeWidgetItem(nullptr,…)`
+(genericpanel.cpp:325,882), a DETACHED ORPHAN with no parent, not in the tree model. The highlight lambdas use
+it as a found-or-null lookup (`if(item) setCurrentItem(item)`); the orphan is non-null, so `setCurrentItem` on
+an item the `QTreeModel` doesn't own derefs invalid memory in `QTreeModel::index()/parent()`. Intermittent
+because it only fires when the panel hasn't yet populated that diagram's item at activation time (startup /
+collection-reload window) — explains why it didn't repro under lldb or on a settled reboot.
+
+**FIX — committed as ad69d989b (2026-06-23).** Added pure-lookup `GenericPanel::itemForDiagram(Diagram*)`
+(mirrors `itemForProject` exactly: `if(!diagram) return nullptr; return diagrams_.value(diagram,nullptr);`) in
+genericpanel.h/.cpp (decl+def after getItemForDiagram), and repointed both highlight handlers
+(qetdiagrameditor.cpp:1888 diagramActivated, :1901 syncElementsPanel) `getItemForDiagram(`→`itemForDiagram(`;
+their existing `if(item)` guard now skips on a cache miss instead of fabricating an orphan. Staged named files
+only: genericpanel.h, genericpanel.cpp, qetdiagrameditor.cpp (never main.cpp).
+
+**TEST — PASS (2026-06-23, Trigger 1 only; log `debug-logs/famA-retest-trigger1-livemirror.log`).** Validated
+the live-mirror + MDI/folio-activation trigger (the 18:52 "live mirror" crash) on an already-open project in the
+fresh Qt6 build (binary mtime 23:49, the one that still crashed at the SEPARATE addProject site — see below):
+live mirror op + repeated folio-tab / MDI-subwindow switching, plus extra coverage (multiple opens, save-as,
+button-Open re-open) → no crash; current page highlights when its item exists. Clean GUI quit; process exit +
+crash-free log confirmed. The 21:06 "reload" trigger was NOT separately exercised — deliberately, per the
+no-File-Open boundary set this session to avoid re-hitting the still-open Family-B addProject crash during a
+Family-A validation; it is code-level covered by the identical two-handler fix (same lambdas, same pure lookup).
+
+**NOTE — a SEPARATE, still-open crash survives this fix:** the project-open `setCurrentItem(child(0))` crash in
+`ElementsPanel::addProject` (elementspanel.cpp:166) — same origin commit a82f6de23, same backtrace signature,
+but a DIFFERENT mechanism (a real spliced child, not a fabricated getItemForDiagram orphan). Tracked as its own
+ACTIVE entry below ("Elements-panel crash on project open"). The 7 latent elementspanelwidget.cpp F3–F9 sites
+(the old "commit 2" — same orphan mechanism as this fix, preventive) are split into their own ACTIVE entry below.
+Both are kept as SEPARATE entries by decision; shared origin commit is not a reason to merge their tracking.
+**Severity:** medium — data-safe (.qet reloads fine once past it) but a hard crash.
+
+### Elements-panel crash on project open — setCurrentItem(child(0)) in ElementsPanel::addProject  · ACTIVE — ROOT CAUSE UNKNOWN, INSTRUMENT BEFORE ANY FIX · branch mirror-flip-rotate
+**Area:** UI / elements panel · **Priority: HIGHER than the (now-RESOLVED) activation crash above** — triggered by
+File ▸ Open, a core/frequent action, vs the narrower project-view-activation trigger. **Pre-existing upstream**
+(origin commit a82f6de23 "Add highlight current page in ProjectView", same commit as the activation crash, but a
+DISTINCT defect family — do NOT fold the two together).
+**Crash:** SIGSEGV (EXC_BAD_ACCESS, KERN_INVALID_ADDRESS at 0x24), report
+`~/Library/Logs/DiagnosticReports/qelectrotech-2026-06-22-235807.ips`. Same backtrace signature as the activation
+crash (`QTreeModel::index ← parent ← QItemSelectionModel::setCurrentIndex ← QTreeWidget::setCurrentItem`) but the
+caller is `ElementsPanel::addProject` elementspanel.cpp:166 `setCurrentItem(qtwi_project->child(0))` ←
+`projectWasOpened`:416 ← `QETDiagramEditor::addProject`:1209 ← `openProject`:1043 (File ▸ Open).
+**Proves it is a SEPARATE site, not the activation crash:** the .ips launched 23:51:32 against the build_qt6
+binary that ALREADY carried the activation fix (itemForDiagram, mtime 23:49), and still crashed at 23:58:02. Qt6
+dev build (procPath `/Users/USER/*/qelectrotech`, parent zsh/Terminal, Qt 6.11.1) — not the installed Qt5 release.
+**Mechanism — genuinely UNKNOWN; distinct from the activation crash.** Here `child(0)` is a REAL child of the
+freshly-built project subtree (built detached via `makeItem`, then spliced into the model at elementspanel.cpp:158
+via `invisibleRootItem()->insertChild()`), NOT a fabricated `getItemForDiagram` orphan — so the itemForDiagram fix
+neither covers nor could cover it. Candidate hypotheses (to TEST, not fix):
+  - (a) `child(0)` is null for a 0-diagram project → `setCurrentItem(nullptr)` on a path that still derefs.
+  - (b) the manual `invisibleRootItem()->insertChild()` splice (line 158) of a pre-built DETACHED subtree leaves
+    child(0) without valid model linkage (treeWidget()/parent inconsistent) when setCurrentItem walks it.
+  - (c) reload path (`first_reload_`) re-inserts an already-parented project item (getItemForProject returns the
+    registered existing item, then it is insertChild'd again).
+  - (d) SingleApplication second-launch forwarding (User recollection): repeated in-app File▸Open ▸ select ▸ Open
+    BUTTON never crashed; the one observed crash coincided with a DOUBLE-CLICK in File▸Open while the build was
+    already running. Candidate: a double-click second-launch is IPC-forwarded into the running instance rather than
+    handled by its normal in-app menu action, and that forwarded path's timing/threading exposes child(0). Same
+    SingleApplication seam CLAUDE.md documents as the reason for main.cpp's app-name workaround — not a new concern.
+**REQUIRED before any fix — instrumentation (measure, don't hypothesise; CLAUDE.md).** Add temporary qDebug() dumps
+around elementspanel.cpp:152–167 capturing, in a SINGLE run: `project`, `project->diagrams().count()`;
+`qtwi_project` ptr, `childCount()`, `treeWidget()` BOTH before and after the line-158 splice; `child(0)` ptr,
+`child(0)->parent()`, `child(0)->treeWidget()`, and whether `child(0)->parent()==qtwi_project`; AND which trigger
+path reached `openProject()` — in-app menu action vs. SingleApplication instance-forwarding signal (distinguishes
+hypothesis (d) empirically). Repro via File ▸ Open of the crash `.qet` files; log to debug-logs/; let the measured
+value name the cause, then design the fix as a separate step. No guessed guard at line 166.
+**Severity:** high — File ▸ Open is a core action; intermittent hard crash on project open.
+
+### Elements-panel: 7 F3–F9 move sites still use getItemForDiagram get-or-create (preventive hardening)  · ACTIVE — not started · branch mirror-flip-rotate
+**Area:** UI / elements panel · **Family:** SAME mechanism as the RESOLVED activation crash above
+(getItemForDiagram fabricates a detached orphan on a cache miss) — but PREVENTIVE: no observed crash at these
+sites. Keep tracked SEPARATELY from the project-open (child(0)) crash above — different mechanism; the shared
+origin commit a82f6de23 is not a reason to merge tracking.
+**What:** repoint the 7 `setSelectedItem(getItemForDiagram(selected_diagram))` call sites in
+elementspanelwidget.cpp:489–530 (the F3–F9 page-move ops: up, down, top, +x10, +x100, up x10, up x100) to the
+pure-lookup `itemForDiagram` added in ad69d989b. **Verified safe:** `setSelectedItem` body is just
+`m_selected_item = selectedItem;` (stores the pointer, no deref → a null arg is fine); all 7 are guarded by
+`if (Diagram *selected_diagram = elements_panel->selectedDiagram())`, and `selectedDiagram()` returns an
+already-displayed diagram, so they never hit the orphan path today — hence no crash report. The swap removes the
+orphan-fabrication CAPABILITY; a genuine cache-miss would then yield no selection instead of a crash.
+**Commit when done:** message must say PREVENTIVE (not "fixes an observed crash"). Staged file:
+`sources/elementspanelwidget.cpp` only (never main.cpp).
+**Test (same rigor as the crash-site fix):** with a diagram selected in the elements panel, exercise
+F3/F4/F5/F6/F7/F8/F9 → each move works, no crash, selection/highlight correct.
+**Severity:** low — latent/defensive; no user-visible change in normal use.
+
 ### Sync master's .gitignore to canonical fork content (resolves Findings 1 & 2 below)  · DONE (pushed) · branch master
 **What:** deliberate decision (not a conflict-driven default) to bring master's `.gitignore` to
 byte-exact parity with `qt6_cmake_joshua` HEAD (the b537842 14-line gold standard). Commit
