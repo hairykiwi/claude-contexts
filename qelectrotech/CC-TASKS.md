@@ -182,7 +182,7 @@ ACTIVE entry below ("Elements-panel crash on project open"). The 7 latent elemen
 Both are kept as SEPARATE entries by decision; shared origin commit is not a reason to merge their tracking.
 **Severity:** medium — data-safe (.qet reloads fine once past it) but a hard crash.
 
-### Elements-panel crash on project open — setCurrentItem(child(0)) in ElementsPanel::addProject  · ACTIVE — ROOT CAUSE UNKNOWN, INSTRUMENT BEFORE ANY FIX · branch mirror-flip-rotate
+### Elements-panel crash on project open — setCurrentItem(child(0)) in ElementsPanel::addProject  · ACTIVE — INVESTIGATED 2026-06-23 (leading hypothesis REFUTED; NOT reproduced); BANKED, defensive-guard fix pending · branch mirror-flip-rotate
 **Area:** UI / elements panel · **Priority: HIGHER than the (now-RESOLVED) activation crash above** — triggered by
 File ▸ Open, a core/frequent action, vs the narrower project-view-activation trigger. **Pre-existing upstream**
 (origin commit a82f6de23 "Add highlight current page in ProjectView", same commit as the activation crash, but a
@@ -209,14 +209,38 @@ neither covers nor could cover it. Candidate hypotheses (to TEST, not fix):
     already running. Candidate: a double-click second-launch is IPC-forwarded into the running instance rather than
     handled by its normal in-app menu action, and that forwarded path's timing/threading exposes child(0). Same
     SingleApplication seam CLAUDE.md documents as the reason for main.cpp's app-name workaround — not a new concern.
-**REQUIRED before any fix — instrumentation (measure, don't hypothesise; CLAUDE.md).** Add temporary qDebug() dumps
-around elementspanel.cpp:152–167 capturing, in a SINGLE run: `project`, `project->diagrams().count()`;
-`qtwi_project` ptr, `childCount()`, `treeWidget()` BOTH before and after the line-158 splice; `child(0)` ptr,
-`child(0)->parent()`, `child(0)->treeWidget()`, and whether `child(0)->parent()==qtwi_project`; AND which trigger
-path reached `openProject()` — in-app menu action vs. SingleApplication instance-forwarding signal (distinguishes
-hypothesis (d) empirically). Repro via File ▸ Open of the crash `.qet` files; log to debug-logs/; let the measured
-value name the cause, then design the fix as a separate step. No guessed guard at line 166.
-**Severity:** high — File ▸ Open is a core action; intermittent hard crash on project open.
+**INVESTIGATION (instrumented 2026-06-23; logs `debug-logs/famB-confirm-{lateopen,earlyopen,doubleclick}.log`).**
+A temporary `qDebug` `[FAMB]` dump was placed in addProject's first_add branch immediately before
+`setCurrentItem(qtwi_project->child(0))`, logging common_tbt_collection_item_, indexOfTopLevelItem, qtwi_project,
+childCount, qtwi_project->treeWidget(), child(0). Three user-driven runs, ~a dozen opens total (startup arg-open,
+button-Open, and the original double-click-while-running-with-files-already-open action, incl. close/reopen with
+address reuse). **CRASH NOT REPRODUCED in any run.** Instrumentation reverted (tree clean), binary rebuilt clean.
+
+**KEY FINDINGS (measured, not hypothesised):**
+- **The detached state is ROUTINE and HARMLESS — refutes hypothesis (b) / the earlier "uninitialized
+  common_tbt_collection_item_ → detached → crash" theory.** Every open BEFORE the panel's first reload() logs
+  `common_tbt_item=0x0, indexOfTopLevelItem=-1, qtwi_treeWidget=0x0` — so `insertChild(-1)` no-ops and qtwi_project
+  is genuinely detached from the model — and `setCurrentItem(child0)` on it did NOT crash. A detached item resolves
+  to row -1 gracefully; **detached ≠ crash.**
+- **reload() self-heals it:** once the 250 ms `firstActivated→reload()` timer fires, reload() re-adds every project
+  in projects_to_display_ with a now-valid common_tbt index, re-attaching the SAME qtwi_project pointers (observed:
+  the first two opens, detached at 11:51, reappear attached at valid indices 1,2 at 11:52).
+- **(a) ruled out** — child(0) non-null in every logged open (childCount 2–4). **(c)/(d) exercised without crash** —
+  close/reopen (same project ptr, new qtwi, childCount 2→4) and the double-click-while-running action both ran clean.
+- **The .ips fault (deref at offset 0x24) is a FREED/garbage QTreeWidgetItem, not a merely-detached one** (detached
+  is now proven graceful). ⇒ refined leading hypothesis: a **dangling qtwi_project (or child) in a narrow lifetime
+  race** — e.g. the 250 ms reload() timer firing across a setCurrentItem, or a specific close+open interleaving —
+  not hittable on demand. Back toward a use-after-free, but of a freed tree item, not the uninitialized-pointer path.
+
+**STATUS: BANKED** (investigation paused, not reproduced; chasing further has diminishing returns). Resume with the
+freed-pointer race in mind: instrument `currentItem()` / old-current validity and target a close-all-then-open sequence.
+
+**FIX DIRECTION (separate task; justified by this data even without a deterministic repro):** a cheap defensive
+guard — skip `setCurrentItem(qtwi_project->child(0))` when `qtwi_project->treeWidget() == nullptr` (item not actually
+attached to the model). Sidesteps the crash AND fixes the genuine detached-insert defect (the
+`insertChild(indexOfTopLevelItem(common_tbt_collection_item_), …)` degrading to `insertChild(-1)` when common_tbt is
+unset). Low-risk. Still investigation-only — no guard committed yet.
+**Severity:** high — File ▸ Open is a core action; intermittent hard crash on project open (rare; not reproducible on demand as of 2026-06-23).
 
 ### Elements-panel: 7 F3–F9 move sites still use getItemForDiagram get-or-create (preventive hardening)  · ACTIVE — not started · branch mirror-flip-rotate
 **Area:** UI / elements panel · **Family:** SAME mechanism as the RESOLVED activation crash above
