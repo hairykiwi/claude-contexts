@@ -195,16 +195,33 @@ documentation.
   fix is additive).
 - Do NOT assume Qt5 APIs are available. Targets Qt 6.x with KF6.
 
-### Two-PR plan (folio mirror/flip work)
-1. **macOS Qt6 build fixes** — own branch; the genuine upstream-worthy build fixes from
-   the recovery recipe below (NOT main.cpp). The `CMakeLists.txt` Linux-only-install guard
-   is SUPERSEDED — Laurent independently committed the equivalent fix to QET master as
-   `5574b4d`. On next rebase/sync onto current upstream, REVERT the local guard in favour
-   of upstream's version; do not carry it forward as a local build-enabler. Remaining Set A
-   items (below) are still open PR candidates.
-2. **Rotation-pivot bug fix** — the original `fix-grouped-text-rotation-pivot` branch
-   content (`elementtextitemgroup.cpp` updateAlignment) is folded into `mirror-flip-rotate`
-   via the `843ba6898` cherry-pick; that branch itself is superseded, don't develop on it.
+### Separating upstream-able fixes from in-progress feature work
+General principle, durable: a dev branch built for one feature often accumulates other
+fixes along the way — build fixes, pre-existing bugs found incidentally, unrelated
+cleanup — that are independently valuable and not entangled with the feature itself.
+Split these out before submitting anything upstream, rather than letting them ride
+along buried in feature-branch history. Two shapes this takes, pick based on whether
+the fix's files/structure match upstream's current layout:
+- **PR-shaped** (files/structure match upstream closely enough that a branch or patch
+  would apply cleanly): prepare via squash/rebase into a small number of well-described
+  commits, own branch, submit as a normal PR.
+- **Report-shaped** (fork's files have diverged in path/structure from upstream's
+  current layout, so a literal patch wouldn't apply): write up the diagnosis + fix
+  direction as a bug report instead — describe what's wrong and how it was fixed on
+  the fork, let upstream apply the equivalent fix to their own current code shape.
+
+**Current candidates (live snapshot — update or remove each as it resolves; don't let
+this list go stale once something's actually done):**
+1. **Rotation-pivot bug fix** — DONE, folded into `mirror-flip-rotate` via the
+   `843ba6898` cherry-pick; the originating branch is superseded, don't develop on it.
+2. **Elements-panel crash fixes** — report-shaped (fork's elements-panel files live at
+   different paths than upstream's current layout, e.g.
+   `sources/elementspanel/genericpanel.cpp` vs. upstream's `sources/genericpanel.cpp`).
+   Pre-existing upstream defects (origin `a82f6de23`), unrelated to the Qt6 port,
+   discovered incidentally while testing the mirror/flip feature. Family A (orphan
+   item) RESOLVED `ad69d989b`; Family B (project-open crash) root-caused to a narrow
+   freed-pointer race, repro elusive, defensive guard committed `917c01da9`. See
+   CC-TASKS.md for full detail.
 - Feature PR (folio mirror/flip) is already implemented on `folio-mirror-flip`;
   rebase/submit after Set A lands. Laurent invited it to master (pid 23013).
 
@@ -325,6 +342,13 @@ for reading but fail to write through one.
 
 Both files are explicitly listed in QET's .gitignore so they cannot be
 accidentally committed into the QET source repo.
+
+**What belongs in these files — before adding any sentence, ask:** would a cold
+reader (a fresh session with no memory of how this was discovered, or User after
+a gap) need this to act correctly — or does it already exist in more detail
+elsewhere, or is it about to resolve/become moot on its own before anyone reads
+it back? If either of the latter, cut it or reduce it to a one-line pointer.
+Aim for this on the first draft rather than relying on a trim pass after.
 
 ## Dev build setup (after a clean reconfigure / wipe)
 Set B (cmake path fix) makes a Debug build look for `elements/`,
