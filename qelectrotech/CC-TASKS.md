@@ -16,6 +16,138 @@ orientation and future-fix insight. Don't duplicate diffs here; do keep reasonin
 
 ## ACTIVE
 
+### Rebase mirror-flip-rotate onto the rebased qt6_cmake_joshua  · DONE (force-pushed 2026-06-23) · branch mirror-flip-rotate
+**What:** moved the feature divergence onto the freshly-rebased qt6_cmake_joshua (`d00f3613d`).
+`git rebase --onto qt6_cmake_joshua <merge-base 082947266> mirror-flip-rotate`. Of 19 commits, **17
+replayed cleanly**; the 2 redundant cherry-picks dropped — `4ed901169` (CMake guard) skipped, already
+in base via the `e342213d4` squash; `39b502ce3` (gitignore) auto-dropped "patch contents already
+upstream". **ZERO semantic conflicts** despite 10 feature files overlapping upstream's 197-commit
+changes (element.cpp/.h, dynamicelementtextitem.cpp, terminal.cpp, elementspanel.cpp,
+qetdiagrameditor.cpp/.h, CMakeLists.txt, qet_compilation_vars.cmake, qet_fr.ts) — upstream's edits sat
+in different regions. New tip `7ebf84876`; force-pushed `917c01da9..7ebf84876` with `--force-with-lease`,
+verified on remote. Rollback = tag `archive-pre-upstream-rebase-mirror-flip-rotate` (`917c01da9`).
+**Hash-rewrite map (pre-rebase → current tip), for cross-referencing older entries:** `207d3cc5b`→`1d9b3d34d`,
+`0a734cdc5`→`391b888c4`, `023070fd8`→`c72a57fb9`, `feeef3cea`→`6107f5217`, `bd61ca17c`→`a7bff9ea3`,
+`6f8dd772c`→`e1d246852`, `3025d380f`→`e724e14ab`, `ad69d989b`→`adbf52abf`, `917c01da9`→`7ebf84876`,
+`b0a405329`→`a2e0495fc`. **`a2e0495fc` ≡ `b0a405329` confirmed same-content-different-hash** (NOT two commits):
+identical `git patch-id --stable` (`82ef6adb…`); the only `git show` diff is blob-index hashes + `@@` line numbers
+(`1082` vs `1073`, upstream shifted surrounding lines). The `b0a405329` grouped-flip fix (`compensateMirrorFlip`
+reflection-extent `br.left()+br.right()` / `br.top()+br.bottom()`) is PRESENT and INTACT at HEAD (element.cpp:1145-1147,
+extracted into `compensateMirrorFlip` by `c72a57fb9`, math unchanged) — code-level confirmed; behavioural re-test
+(grouped flip 0/90/180/270, live==reload, no ~group-height jump) still pending a GUI run.
+**Validation:** fresh configure+build clean (0 errors); all 6 feature fingerprints present (mirror/flip
+command, `compensateMirrorFlip`, `itemForDiagram`, addProject guard, synchronous RotateTextsCommand,
+free-rotation default). User regression `mfr-rebase-regression`: tests 1,2,3,5 PASS; 4 & 6 PARTIAL but
+**both empirically confirmed PRE-EXISTING** (reproduce identically on the `917c01da9` pre-rebase build,
+rebuilt + retested this session) — NOT rebase regressions → two new OPEN entries below.
+**LFS push gotcha (recurring):** a git-lfs `pre-push` hook (`.git/hooks/pre-push`, appeared during the
+archive-tag checkout) exits 2 and blocks ALL pushes because `git-lfs` isn't installed. `.gitattributes`
+only LFS-tracks `*.qch` (none in tree), so it's spurious. Bypass per-push with `git push --no-verify`,
+or delete the hook (the hook's own message says so). The earlier qt6 push pre-dated the hook, hence
+worked without `--no-verify`.
+
+### keep_visual_rotation toggle doesn't re-fire readability correction live  · OPEN (pre-existing; missing-trigger class) · branch mirror-flip-rotate
+**Symptom:** cycling a text's keep_visual_rotation switch ON→OFF→ON→OFF — on the final OFF the live view
+does NOT re-orient the text; it corrects only after a save/reload or a subsequent element-level
+mirror/flip/rotate. Text POSITION stays correct throughout; only orientation lags.
+**Class — same "missing trigger" family** as the RESOLVED trigger-lag (`023070fd8`/`0a734cdc5`,
+post-rebase `c72a57fb9`/`391b888c4`) and its compensate-on-own-rotation gap: `correctReadability` has only
+element-level call sites (`applyMirrorFlip`, `onElementRotated`, and the command-driven
+`correctTextReadability` in the two rotate commands); nothing is wired to the switch toggle. Scope together
+with the create-text gap below (and ISO-layout, FEATURE IDEA #7) as one trigger-coverage pass, not as
+separate one-offs.
+**Trigger wiring traced (code, 2026-06-23):** the diagram-side toggle routes
+`DynamicElementTextModel` (dynamicelementtextmodel.cpp:625) → `QPropertyUndoCommand(deti,
+"keepVisualRotation", …)` → `DynamicElementTextItem::setKeepVisualRotation` (dynamicelementtextitem.cpp:1508).
+That setter ONLY sets `m_keep_visual_rotation`, emits `keepVisualRotationChanged`, and connects/disconnects
+the rotation signals — it calls NO correction. `keepVisualRotationChanged` has ZERO diagram-side readability
+listener (its only `connect` is element-EDITOR side, `PartDynamicTextField` at dynamictextfieldeditor.cpp:199 —
+a different class). So toggling changes the flag but never recomputes the displayed orientation; the text holds
+whatever the last correction left it at until the next `applyMirrorFlip` (any M/F/R) or `fromXml`→`applyMirrorFlip`
+(reload) re-fires. Position is untouched because `compensateMirrorFlip`'s per-item transform isn't flag-dependent
+and the toggle doesn't disturb it.
+**NOT a `207d3cc5b` side-effect (verified, not assumed):** the setter is BYTE-IDENTICAL at `207d3cc5b^` and has
+never called `correctReadability`, so the toggle triggered nothing before that commit either. `207d3cc5b`
+(post-rebase `1d9b3d34d`) changed only what `correctReadability` DOES in its OFF branch (I→R 180° force → no-op),
+i.e. the self-heal DESTINATION once some later trigger clears the lag — NOT WHEN correction fires. ⇒ the
+live-update-on-toggle gap is pre-existing and independent of `207d3cc5b`. ("Reproduces on `917c01da9`" only proves
+not-a-rebase-regression — `917c01da9` already contains `207d3cc5b`; the setter-identity at `207d3cc5b^` is what
+proves it predates the ISO-layout removal.) **Severity:** low — cosmetic orientation lag; self-heals on any
+transform/reload; position never wrong.
+
+### New text on an already-mirrored/flipped element draws reflected until next transform  · OPEN (pre-existing; missing-trigger class) · branch mirror-flip-rotate
+**Symptom:** create a new dynamic text on an element already mirrored and/or flipped → the text renders
+geometrically mirrored/flipped (unreadable) until a subsequent M|F|R or save/reload redraws it correctly.
+Glancingly seen earlier during the T5 crash work (debug-logs file named "...subsequent mirror redraws text
+with geometric mirror.qet") but never logged as its own defect — now confirmed it is a benign display lag,
+distinct from that (since-fixed) panel crash.
+**Class:** missing-trigger family — the text-creation path doesn't fire `correctReadability` /
+`compensateMirrorFlip`; only element-level events do. Scope with the toggle gap above.
+**Mechanism traced (code, 2026-06-23) — it's the `compensateMirrorFlip` half, NOT readability:**
+`applyMirrorFlip` (element.cpp:1072) applies the reflection as an ELEMENT-level `setTransform(scale(sx,sy))`.
+Dynamic texts are direct child items (`deti->setParentItem(this)`, addDynamicTextItem:1259) with no
+`ItemIgnoresTransformations`, so they INHERIT that reflection scale; the per-child `compensateMirrorFlip` is what
+cancels the inherited reflection (and reflects the position) so each text reads correctly. New-text creation goes
+`AddElementTextCommand::redo()` (addelementtextcommand.cpp:72) → `Element::addDynamicTextItem` (element.cpp:1259):
+append + `setParentItem` only, calling NEITHER `compensateMirrorFlip` NOR `correctTextReadability`. So a text added
+onto an already-reflected element inherits the element's reflection scale with an identity local transform →
+draws geometrically mirrored/flipped, until the next `applyMirrorFlip` iterates the now-larger `m_dynamic_text_list`
+and compensates it. The VISIBLE defect is purely the uncompensated reflection scale, not orientation (a fresh
+`DynamicElementTextItem` defaults keep_visual_rotation=ON at rotation 0, so `correctReadability` is a no-op anyway)
+— a `compensateMirrorFlip` gap, cleanly separate from the readability logic.
+**Origin = the folio mirror/flip feature itself (NOT `207d3cc5b`):** `998f597d0` introduced the element-scale +
+per-child compensation; `addelementtextcommand.cpp` has ZERO commits on the feature range `d00f3613d..HEAD` and
+`addDynamicTextItem` was never modified by it — the pre-existing add-text command was never taught about the new
+reflection state. `207d3cc5b` touched only `correctReadability`'s OFF orientation branch, unrelated.
+**Confirmed pre-existing:** reproduces identically on `917c01da9` (pre-rebase; correct re the rebase/UAF work — the
+deeper origin is the feature-design coverage gap above). **Severity:** low-medium — new text temporarily
+unreadable; corrects on any transform/reload, no data corruption.
+
+### Rebase qt6_cmake_joshua onto current upstream/master (squash + force-push)  · DONE (force-pushed 2026-06-23) · branch qt6_cmake_joshua
+**What:** brought the fork's Qt6 port branch current with upstream. Squashed the 27-commit
+divergence (since merge-base `b1466ec649`) into ONE commit, rebased onto `upstream/master`
+(`d3cf8f263`). New tip `d00f3613d` "Qt6/CMake port and macOS build fixes" — 1 ahead / 0 behind
+upstream, linear (parent = upstream tip). Force-pushed with `--force-with-lease`
+(`b537842ac…d00f3613d`); verified on remote via `git ls-remote`. Scope was qt6_cmake_joshua ONLY —
+mirror-flip-rotate / master / folio-mirror-flip / fix-grouped-text-rotation-pivot untouched.
+**Safety net:** archive tags pushed to origin BEFORE any rewrite —
+`archive-pre-upstream-rebase-qt6_cmake_joshua` (`b537842ac`) and
+`archive-pre-upstream-rebase-mirror-flip-rotate` (`917c01da9`). The qt6 tag is the rollback.
+**Method:** dry run first on throwaway `dryrun-qt6-joshua-squash` (never pushed; left for reference),
+to characterize conflicts before touching the real branch.
+
+**Conflict reality — far cleaner than feared.** 27 fork commits vs **197** upstream commits since
+merge-base, yet only ONE file had git conflicts: `CMakeLists.txt` (4 regions), all on the
+**Qt5↔Qt6 build-system boundary** — **upstream/master is still a Qt5 codebase** (`find_package(NAMES
+Qt5)`, `qt5_*_translation`, `KF5_*`, plain `add_executable`, includes `hoto_update_cmake_message.cmake`).
+Resolved by taking the fork's Qt6 constructs; took upstream's version bump `0.100.1`; dropped the
+`hoto_update` include (the Qt6 branch author `1ba97c7e9` deliberately deleted that file — verified no
+other refs). So this rebase carries the Qt6 port FORWARD over an evolving Qt5 master — the
+CMakeLists.txt conflict will RECUR on every future upstream build-system touch.
+
+**Two SILENT auto-merge artifacts (no conflict markers, but build-breaking) in
+`cmake/qet_compilation_vars.cmake`** — the dangerous part, since they don't show as conflicts:
+upstream added `Qt::GuiPrivate` (its new PDF-hyperlink feature, `QPdfEngine::drawHyperlink`) which
+needs `GuiPrivate` in the Qt6 `find_package` COMPONENTS (added); and `qetsvg.cpp/h` got listed twice
+(upstream add + fork's existing → de-duplicated). LESSON: new upstream features using
+Qt-version-sensitive APIs need small Qt6-porting touch-ups at each integration, and they surface as
+silent semantic breakage, not git conflicts — grep the configure/build for them, don't trust
+"no conflict markers."
+
+**Re-validation (smoke-test scope, not the rotation matrices — those live on mirror-flip-rotate, NOT
+here):** fresh `cmake ..` + `make -j8` clean (exit 0, 0 errors, 59 normal Qt6-deprec warnings, binary
+mtime 15:00). User smoke test `qt6-rebase-smoke` PASS: launch, symbol library populated, English UI,
+new-diagram → drop element → edit text → save `qt6-rebase-smoke.qet` → reload, titleblock shown.
+**main.cpp discipline held:** the app-name workaround was stashed across the whole op and never
+entered the squash (verified committed main.cpp has no `QElectroTech-Qt6` string); restored unstaged
+afterward for the runtime binary.
+
+**Follow-ups (not done here):** (1) upstream PR-prep is a SEPARATE task — the squash bundles fork-only
+artifacts (knowledge-graph JSON, CLAUDE.md/CC-TASKS.md gitignore housekeeping) that must be stripped
+before any upstream submission. (2) Rebasing mirror-flip-rotate onto the new qt6_cmake_joshua is the
+explicitly-deferred next task. (3) throwaway `dryrun-qt6-joshua-squash` branch still exists locally —
+delete when no longer wanted for reference.
+
 ### Make Dialog-rotate (RotateTextsCommand) fully synchronous — drop the animation  · COMMITTED (3025d380f, pushed) · branch mirror-flip-rotate
 **Landed 2026-06-22 as `3025d380f` "Rotate texts via the orientation dialog synchronously"** (push
 `39b502ce3..3025d380f`, fast-forward). Two named files only (rotatetextscommand.cpp + .h); main.cpp
