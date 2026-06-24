@@ -839,12 +839,17 @@ live gap; the persisted ~19px is the additional `removeFromGroup`-baking issue.
   (139.814,148.289) ~22px; 838b8933 (152.793,134.377)→(129.01,139.721) ~24px. **Two of the three now share x=129.01**
   — that IS the "2 of 3 lines overlapping," baked into the saved file. `texts_groups` is empty in the after-file
   (group genuinely dissolved); rotation (40) and the element `flip` flag intact ⇒ purely positional, not orientation.
-- **Geometric mirror is NOT serialized (transform-level), so by the serialization model it self-heals on reload:** the
-  3 texts are written into the instance `m_dynamic_text_list` block (not a group), so reload's `fromXml`(:807)→
-  `applyMirrorFlip`(:857) re-applies `compensateMirrorFlip` over every list item ⇒ mirror cleared, displaced positions
-  fed straight back in. **Visual reload not yet eyeballed** — scheduled mixed test `ungroup-mirror-split`
-  (S0 baseline → S1 live-ungrouped save → reload → S2 save; S1-vs-S2 on-disk diff + user "mirrored? Y/N" at each
-  bracket the reload). Self-heal stays serialization-confirmed/visual-pending until that runs.
+- **Geometric mirror is a LIVE-only artifact that self-heals — now FULLY CONFIRMED (visual + on-disk), test
+  `ungroup-mirror-split` 2026-06-24.** Mirror is NOT serialized (transform-level); the 3 texts are written into the
+  instance `m_dynamic_text_list` block (not a group), so any later `applyMirrorFlip` re-compensates them. User
+  observations: S0 baseline readable/correct; S2 live-ungrouped = geometrically mirrored + 2 of 3 overlap; **S4 after
+  close+reopen = mirror GONE, all 3 readable, same 2 still overlap**; **S6 after a live Mirror×2 transform (no reload) =
+  mirror ALSO cleared, same 2 still overlap** — so the mirror clears on reload OR on any element transform (the
+  missing-trigger self-heal). On-disk proof: the three texts' x/y are **byte-identical across S1 (live-broken save),
+  S2 (post-reload save), and S3 (post-transform save)** — ef969dbc (129.01,162.721), 838b8933 (129.01,139.721),
+  39005911 (139.814,148.289) — i.e. S1 *looked* mirrored and S2 didn't, yet the saved geometry is identical, proving
+  the mirror was purely a live render state, never on disk; and the displacement is pixel-stable through reload and
+  through a transform (compensateMirrorFlip reflects from the displaced pos, never corrects it).
 **Severity:** RAISED low → MEDIUM — the new manifestation yields unreadable, overlapping text (not a minor ~19px
 nudge). Still reachable only via Properties → Delete-group; no right-click ungroup gesture exists, which caps exposure.
 **Fix shape — TWO fixes, not one (scoped 2026-06-24 via `addDynamicTextItem` caller map):** the two manifestations
@@ -868,11 +873,11 @@ need different fixes.
 **Related (separate, not a dependency):** shares the ungroup/`removeFromGroup` path with the LAYER 2 readability entry.
 Distinct concern (this = mirror geometry; that = rotation orientation display). Whoever codes second must not regress
 the first in the shared function.
-**Next:** displacement-persists already MEASURED (above); remaining open step is the `ungroup-mirror-split` visual
-reload to confirm the mirror self-heals live. Then own scoped session for the TWO fixes above (the shared live
-`correctTextReadability` hook is the low-risk one and also closes the create-text entry; the `removeFromGroup`
-design-frame re-expression is the trickier one — it touches the shared detach that is *correct* for unmirrored
-ungroup, so write a verification matrix first). NOTE: explicitly logged as future work — not today's task.
+**Next:** investigation COMPLETE — both manifestations measured AND visually confirmed separate (`ungroup-mirror-split`,
+2026-06-24); nothing left to characterize. Remaining work is the TWO fixes above, as a future scoped session: the
+shared live `correctTextReadability` hook (low-risk; also closes the create-text entry) and the `removeFromGroup`
+design-frame re-expression (trickier — it touches the shared detach that is *correct* for unmirrored ungroup, so write
+a verification matrix first). NOTE: explicitly logged as future work — not today's task.
 
 ### Grouped text at non-cardinal angles: offset overridden on ungroup/regroup  · DEFERRED (edge case)
 **Area:** element text rotation/readability · **Branch:** mirror-flip-rotate
