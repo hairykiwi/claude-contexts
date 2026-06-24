@@ -832,21 +832,47 @@ the reflection with an identity local transform ⇒ the geometric mirror; `remov
 committed save-path fix (05bcba506). **Shared gap with the create-text OPEN entry:** both flow through
 `addDynamicTextItem` missing the post-attach `compensateMirrorFlip` — the geometric-mirror manifestation here IS that
 live gap; the persisted ~19px is the additional `removeFromGroup`-baking issue.
-**UNMEASURED (needs a GUI round-trip, not guessed):** whether the NEW geometric-mirror/overlap manifestation persists
-to disk or self-heals on reload. By code, the live mirror should self-heal on reload (`fromXml`→`applyMirrorFlip`
-re-applies `compensateMirrorFlip` across `m_dynamic_text_list`), while the ~19px positional was confirmed to persist —
-so the two effects may decouple under save/reload. Confirm before sizing the fix.
+**MEASURED — two issues are genuinely SEPARATE (2026-06-24, from the existing 23-Jun re-test artifacts
+`debug-logs/qet-re-test-b0a405329-{00,ungroup-FAIL-geometric-mirror-of-TUs-01}.qet`; element `flip="true"`):**
+- **Displacement PERSISTS to disk — confirmed, and bigger than "~19px": 14–24px.** The three `rotation="40"` group
+  members moved on ungroup: ef969dbc (138.009,151.996)→(129.01,162.721) ~14px; 39005911 (125.673,165.142)→
+  (139.814,148.289) ~22px; 838b8933 (152.793,134.377)→(129.01,139.721) ~24px. **Two of the three now share x=129.01**
+  — that IS the "2 of 3 lines overlapping," baked into the saved file. `texts_groups` is empty in the after-file
+  (group genuinely dissolved); rotation (40) and the element `flip` flag intact ⇒ purely positional, not orientation.
+- **Geometric mirror is NOT serialized (transform-level), so by the serialization model it self-heals on reload:** the
+  3 texts are written into the instance `m_dynamic_text_list` block (not a group), so reload's `fromXml`(:807)→
+  `applyMirrorFlip`(:857) re-applies `compensateMirrorFlip` over every list item ⇒ mirror cleared, displaced positions
+  fed straight back in. **Visual reload not yet eyeballed** — scheduled mixed test `ungroup-mirror-split`
+  (S0 baseline → S1 live-ungrouped save → reload → S2 save; S1-vs-S2 on-disk diff + user "mirrored? Y/N" at each
+  bracket the reload). Self-heal stays serialization-confirmed/visual-pending until that runs.
 **Severity:** RAISED low → MEDIUM — the new manifestation yields unreadable, overlapping text (not a minor ~19px
 nudge). Still reachable only via Properties → Delete-group; no right-click ungroup gesture exists, which caps exposure.
-**Likely fix shape:** re-express the detached child geometry in one mirror-free frame and re-apply
-`compensateMirrorFlip` (+ `correctTextReadability`) after `addDynamicTextItem`, instead of relying on the
-scene-preserving detach. A single add-text/reattach compensation hook may close this AND the create-text OPEN entry.
+**Fix shape — TWO fixes, not one (scoped 2026-06-24 via `addDynamicTextItem` caller map):** the two manifestations
+need different fixes.
+- **Geometric mirror (live):** add a post-attach `Element::correctTextReadability(item)` call (it already does
+  readability + `compensateMirrorFlip` when `m_mirror||m_flip`, exactly mirroring `applyMirrorFlip`'s per-item pass) at
+  the LIVE `addDynamicTextItem` call sites ONLY — `removeTextFromGroup` (element.cpp:1461, ungroup),
+  `AddElementTextCommand::redo` (addelementtextcommand.cpp:75, create), and `DeleteQGraphicsItemCommand::undo`
+  (deleteqgraphicsitemcommand.cpp:294/298, delete-undo — a THIRD live site, same gap). Closes this AND the create-text
+  OPEN entry with one shared helper at three sites.
+- **Do NOT bake an unconditional hook inside `addDynamicTextItem`:** it is also on the LOAD path
+  (instance `fromXml` element.cpp:807, `m_mirror` parsed at :789) and the definition-build path
+  (`parseDynamicText` :620) — BOTH already compensate separately via `applyMirrorFlip()` at :857. An in-function call
+  would be redundant on load AND fires at :807 *before* `deti->fromXml()` sets geometry (un-geometried no-op);
+  `compensateMirrorFlip` is idempotent/transform-only so it wouldn't corrupt, but `correctReadability` mutates rotation,
+  making an unconditional in-function call semantically muddy on load. Split at the call sites, leave load untouched.
+- **Positional displacement (persists to disk):** SEPARATE fix in `removeFromGroup`/`removeTextFromGroup` — re-express
+  the detached child geometry in the clean mirror-free "design" frame (cf. 05bcba506) instead of the scene-preserving
+  detach. The live `compensateMirrorFlip` hook above does NOT fix this — it reflects from whatever displaced `pos()`
+  the detach left, so the baked-in 14–24px / overlap survives regardless.
 **Related (separate, not a dependency):** shares the ungroup/`removeFromGroup` path with the LAYER 2 readability entry.
 Distinct concern (this = mirror geometry; that = rotation orientation display). Whoever codes second must not regress
 the first in the shared function.
-**Next:** own scoped session; FIRST measure the save/reload behaviour of the new manifestation (above), then confirm
-same-shape vs trickier (it touches the shared `removeFromGroup` that's *correct* for unmirrored ungroup), write fix +
-verification matrix before implementing. NOTE: explicitly logged as future work — not today's task.
+**Next:** displacement-persists already MEASURED (above); remaining open step is the `ungroup-mirror-split` visual
+reload to confirm the mirror self-heals live. Then own scoped session for the TWO fixes above (the shared live
+`correctTextReadability` hook is the low-risk one and also closes the create-text entry; the `removeFromGroup`
+design-frame re-expression is the trickier one — it touches the shared detach that is *correct* for unmirrored
+ungroup, so write a verification matrix first). NOTE: explicitly logged as future work — not today's task.
 
 ### Grouped text at non-cardinal angles: offset overridden on ungroup/regroup  · DEFERRED (edge case)
 **Area:** element text rotation/readability · **Branch:** mirror-flip-rotate
