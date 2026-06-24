@@ -16,61 +16,39 @@ orientation and future-fix insight. Don't duplicate diffs here; do keep reasonin
 
 ## ACTIVE
 
-### Shared live-compensation fix: correctTextReadability at three attach sites  · NEEDS-TEST (matrix incomplete) · branch mirror-flip-rotate
-**What:** add a post-attach `Element::correctTextReadability(item)` at the three live text-attach
-call SITES so a text attached to an already-mirrored/flipped element compensates immediately instead
-of drawing geometrically reflected until the next M/F/R or reload. Closes the "new text on already-
-mirrored/flipped element" OPEN entry and the geometric-mirror half of the ungroup entry, via one shared
-helper (the existing public `correctTextReadability`, element.cpp:1210 — readability + `compensateMirrorFlip`
-when mirror/flip; no-op otherwise). NOT inside `addDynamicTextItem` (load path already compensates via
-`applyMirrorFlip`; an in-function hook would double-fire). Sites:
-- `Element::removeTextFromGroup` (element.cpp, ungroup) → `correctTextReadability(text)` (target = text).
-- `AddElementTextCommand::redo` (create) → `m_element->correctTextReadability(m_text)` (target = text).
-- `DeleteQGraphicsItemCommand::undo` (delete-undo): ungrouped branch → `correctTextReadability(deti)`;
-  grouped branch → `correctTextReadability(group)` AFTER `addTextToGroup` (target = the GROUP, matching how
-  applyMirrorFlip compensates grouped texts — NOT identical to the other two sites; the brief's
-  "don't assume site 1 generalizes" case).
-**Scope guard:** the removeFromGroup positional-displacement (~14–24px) fix is SEPARATE and out of scope;
-the non-cardinal-angle DEFERRED entry is out of scope. `addDynamicTextItem` itself untouched.
+### Shared live-compensation fix: correctTextReadability at three attach sites  · RESOLVED (ade229881, pushed) · branch mirror-flip-rotate
+**What:** a post-attach `Element::correctTextReadability(item)` at the live text-attach SITES so a text
+attached to an already-mirrored/flipped element compensates immediately instead of drawing geometrically
+reflected until the next M/F/R or reload. Closes the "new text on already-mirrored/flipped element" OPEN
+entry and the geometric-mirror half of the ungroup entry, via one shared helper (existing public
+`correctTextReadability`, element.cpp:1210 — readability + `compensateMirrorFlip` when mirror/flip; no-op
+otherwise). Placed at the attach sites, NOT inside `addDynamicTextItem` (load path already compensates via
+`applyMirrorFlip`; an in-function hook would double-fire). **Committed sites (3):**
+- `Element::removeTextFromGroup` (element.cpp, ungroup) → `correctTextReadability(text)`.
+- `AddElementTextCommand::redo` (create) → `m_element->correctTextReadability(m_text)`.
+- `DeleteQGraphicsItemCommand::undo`, UNGROUPED-text branch → `correctTextReadability(deti)`.
+**Grouped delete-undo branch — DELIBERATELY no group-level call (a code comment marks the spot, not a TODO).**
+Originally added `correctTextReadability(group)` there; T4 measurement removed it. Rationale: the group is not
+deleted (only the text), so its mirror/flip compensation persists; a group-level correction was measured a
+no-op (the two untouched grouped texts stayed pristine — a group-level call would have moved all three). The
+restored text's misposition is the pre-existing addToGroup local-position recompute (deferred, see the
+"Genuine ungroup… displaces text" entry), which a group-level call cannot fix. Same precedent as the
+ISO-layout removal — don't ship currently-non-functional code on a future-use bet; if addToGroup is fixed to
+recompute the local position correctly under reflection, there's likely no residual state for a downstream
+group correction to fix anyway. Recoverable from this commit's history if that bet proves out.
+**Scope guard (held):** the removeFromGroup/addToGroup positional-displacement (~14–24px) fix is SEPARATE/
+out of scope; the non-cardinal-angle DEFERRED entry is out of scope. `addDynamicTextItem` itself untouched.
 **Structural confirmation (measured):** `toXml` serializes only pos/rotation (dynamicelementtextitem.cpp:93-95),
-NOT the QTransform; our change sets only the transform and is a no-op on pos/rotation for a fresh text
-(net=0). Proof from the two POST-FIX save files (`debug-logs/qet-re-test-b0a405329-POST-FIX-save-after text
-placed on mirrored*.qet`): every text shared between the mirror+flip file and the mirror-only file has
-IDENTICAL saved x/y/rotation despite the differing flip flag ⇒ saved bytes are fix-independent; reload is
+NOT the QTransform; the change sets only the transform and is a no-op on pos/rotation for a fresh text (net=0).
+Proof from two POST-FIX save files: every text shared between the mirror+flip file and the mirror-only file
+has IDENTICAL saved x/y/rotation despite the differing flip flag ⇒ saved bytes are fix-independent; reload is
 governed entirely by the unchanged load path.
-**Test status (2026-06-24, build mtime 10:04):** T1 ungroup PASS. T2 create LIVE PASS; reload portion
-NOT validated — User reported the reload "looked different" but explicitly is NOT confident in that
-recollection (treat as UNCONFIRMED, re-observe fresh; do NOT record it as "User saw a reload regression").
-The T2 run was then interrupted by the unrelated toolbar-cursor crash below (NOT a regression). T3 (delete-undo
-ungrouped), T4 (delete-undo grouped), T5 (displacement regression), T6 (load sanity) NOT YET RUN. Do not
-commit until matrix passes. Staged set when ready (named files only, never main.cpp): element.cpp,
-addelementtextcommand.cpp, deleteqgraphicsitemcommand.cpp.
-
-**>>> RESUME AFTER REBOOT (for the fresh /clear session) <<<**
-State on disk (persists across reboot):
-- Source edits are PRESENT but UNCOMMITTED in the working tree — element.cpp (removeTextFromGroup),
-  addelementtextcommand.cpp (redo), deleteqgraphicsitemcommand.cpp (undo). Verify with
-  `git -C ~/qelectrotech diff --stat sources/qetgraphicsitem/element.cpp sources/undocommand/addelementtextcommand.cpp sources/undocommand/deleteqgraphicsitemcommand.cpp`.
-- `build_qt6/qelectrotech` (mtime 2026-06-24 10:04) ALREADY contains the fix — no rebuild needed unless
-  the source is re-edited. (Also present uncommitted: the permanent local build-enablers incl. main.cpp —
-  never stage them.)
-- Launch is OK post-reboot (User authorized CC to launch QET backgrounded with a log; log to
-  `~/qelectrotech/debug-logs/livecomp-rerun-<purpose>.log`). CC must NEVER kill it — User quits via GUI
-  after the schedule. If launch silently exits, SingleApplication stale shm may still be set → reboot again.
-RERUN TEST SCHEDULE (anchor name: `livecomp-rerun`) — run against the 10:04 binary:
-- T2-reload: on an already mirror+flip element add a new dynamic text → save → reload. Confirm the reloaded
-  layout MATCHES the live layout (live==reload). ✅ no double-compensation / new-text reads correctly.
-  (Avoid hovering the toolbar right after load — that triggers the separate cursor crash.)
-- T3 delete-undo (ungrouped text on a mirror/flip element): delete a text, undo → restores correct, no
-  subsequent transform needed.
-- T4 delete-undo (GROUPED text on a mirror/flip element): delete a grouped text, undo → restores correct;
-  group not double-reflected. (Exercises the group-target branch — the site that does NOT mirror sites 1/2.)
-- T5 displacement regression: confirm the persisted ~14–24px ungroup displacement is UNCHANGED by this fix
-  (this fix doesn't touch that mechanism; confirm, don't assume — e.g. the "Text 1"/"Text 3" overlap seen in T1).
-- T6 load sanity: open an existing mirror/flip-with-text file → no double-compensation artifact.
-ON FULL PASS: propose commit msg + staged list (the 3 named files only), get explicit approval, commit,
-then `cd build_qt6 && cmake .. <canonical> && make -j8` (refresh GitRevision), push origin mirror-flip-rotate.
-ON FAIL: fix before committing. Test files: save under the `livecomp-rerun` anchor name (swap extension).
+**Test result (2026-06-24, binary mtime 10:04 then 19:02 after commit):** T1 ungroup PASS, T2 create + reload
+PASS (the earlier "looked different on reload" was User's own uncertain recollection — re-observed clean,
+live==reload), T3 delete-undo ungrouped PASS, T6 load sanity PASS. T4 delete-undo GROUPED → the group-level
+call was found redundant/ineffective (above) and removed. T5 → non-mirror/flip ungroup confirmed position-
+neutral (the "unmirrored-unflipped-saved-pass.qet" file); mirror/flip case intentionally reflects position
+(that IS the fix). The toolbar-cursor SIGTRAP crash that interrupted the first T2 run is unrelated (own entry).
 
 ### macOS/Qt6 toolbar-cursor CGImage crash (SIGTRAP, unrelated to feature work)  · OPEN (known-issue candidate; pre-existing) · branch mirror-flip-rotate
 **Crash:** SIGTRAP / EXC_BREAKPOINT (NOT the SIGSEGV/0x24 panel-UAF family). Report
@@ -147,8 +125,12 @@ not-a-rebase-regression — `917c01da9` already contains `207d3cc5b`; the setter
 proves it predates the ISO-layout removal.) **Severity:** low — cosmetic orientation lag; self-heals on any
 transform/reload; position never wrong.
 
-### New text on an already-mirrored/flipped element draws reflected until next transform  · OPEN (pre-existing; missing-trigger class) · branch mirror-flip-rotate
-**Symptom:** create a new dynamic text on an element already mirrored and/or flipped → the text renders
+### New text on an already-mirrored/flipped element draws reflected until next transform  · RESOLVED (ade229881) · branch mirror-flip-rotate
+**RESOLVED 2026-06-24 by the shared live-compensation fix (top entry, ade229881):** `AddElementTextCommand::redo`
+now calls `Element::correctTextReadability(m_text)` post-attach, and `removeTextFromGroup` does the same on
+ungroup — closing both the create-text manifestation and the geometric-mirror half of the ungroup entry. The
+positional (~19px) half of the ungroup case is the separate deferred addToGroup/removeFromGroup issue below.
+**Symptom (historical):** create a new dynamic text on an element already mirrored and/or flipped → the text renders
 geometrically mirrored/flipped (unreadable) until a subsequent M|F|R or save/reload redraws it correctly.
 Glancingly seen earlier during the T5 crash work (debug-logs file named "...subsequent mirror redraws text
 with geometric mirror.qet") but never logged as its own defect — now confirmed it is a benign display lag,
@@ -884,8 +866,17 @@ Two reasoning checks run during scoping (both relevant if (a) is ever revisited 
 
 **Commit structure:** 2-commit split — 023070fd8 (pure `compensateMirrorFlip` extract, no behaviour change, verified against an isolated extract-only build so the "verified" claim matches that commit's tree) then 0a734cdc5 (the trigger + compensate-on-own-rotation fix). main.cpp never staged.
 
-### Genuine ungroup of a mirrored element displaces text / renders it geometrically mirrored  · DEFERRED
+### Genuine ungroup of a mirrored element displaces text / renders it geometrically mirrored  · PARTIALLY RESOLVED (geometric-mirror half: ade229881) / positional displacement still DEFERRED
 **Area:** element text groups · **Branch:** folio-mirror-flip (repro also on mirror-flip-rotate)
+**UPDATE 2026-06-24:** the LIVE geometric-mirror half is RESOLVED by the shared `correctTextReadability` fix
+(ade229881, top entry) — `removeTextFromGroup` now compensates the ungrouped text post-attach. The POSITIONAL
+displacement (~14–24px, persists to disk) remains DEFERRED, untouched by that fix (it reflects from the
+already-displaced pos; see the fix-shape note below). New diagnostic clue from the delete-undo-grouped test
+(T4, files `debug-logs/livecomp-rerun-T4-delete-undo-grouped-*.qet`): restoring one grouped text via
+delete+undo on a mirror+flip element moved ITS local position **(0, 19) → (−38.31, 0)** while the other two
+grouped texts stayed pristine. **−38.31 ≈ 2 × 19.16**, with a 19→0 / 0→−38.31 axis swap ⇒ the `addToGroup`
+local-position recompute under reflection has a DOUBLING-or-sign-flip character (not a generic miscalc) —
+a concrete lead for whoever scopes the positional fix. Same ~19px family as the original ungroup symptom.
 **Location (current line numbers):** `Element::removeTextFromGroup` (element.cpp:1451) →
 `ElementTextItemGroup::removeFromGroup` (elementtextitemgroup.cpp:111, which `resetTransform()` :119 +
 `setRotation(group rotation)` :120) → `Element::addDynamicTextItem` (element.cpp:1259). (Old "1367" ref was stale.)
@@ -926,12 +917,12 @@ live gap; the persisted ~19px is the additional `removeFromGroup`-baking issue.
 nudge). Still reachable only via Properties → Delete-group; no right-click ungroup gesture exists, which caps exposure.
 **Fix shape — TWO fixes, not one (scoped 2026-06-24 via `addDynamicTextItem` caller map):** the two manifestations
 need different fixes.
-- **Geometric mirror (live):** add a post-attach `Element::correctTextReadability(item)` call (it already does
-  readability + `compensateMirrorFlip` when `m_mirror||m_flip`, exactly mirroring `applyMirrorFlip`'s per-item pass) at
-  the LIVE `addDynamicTextItem` call sites ONLY — `removeTextFromGroup` (element.cpp:1461, ungroup),
-  `AddElementTextCommand::redo` (addelementtextcommand.cpp:75, create), and `DeleteQGraphicsItemCommand::undo`
-  (deleteqgraphicsitemcommand.cpp:294/298, delete-undo — a THIRD live site, same gap). Closes this AND the create-text
-  OPEN entry with one shared helper at three sites.
+- **Geometric mirror (live): DONE (ade229881, 2026-06-24).** Added the post-attach `Element::correctTextReadability(item)`
+  call (readability + `compensateMirrorFlip` when `m_mirror||m_flip`, mirroring `applyMirrorFlip`'s per-item pass) at the
+  LIVE attach sites — `removeTextFromGroup` (ungroup), `AddElementTextCommand::redo` (create), and the UNGROUPED-text
+  branch of `DeleteQGraphicsItemCommand::undo` (delete-undo). Closed this AND the create-text entry with one shared
+  helper. The delete-undo GROUPED branch was trialled then dropped (group compensation persists across a text-only
+  delete ⇒ the call is a no-op there; a comment marks the spot — see top entry).
 - **Do NOT bake an unconditional hook inside `addDynamicTextItem`:** it is also on the LOAD path
   (instance `fromXml` element.cpp:807, `m_mirror` parsed at :789) and the definition-build path
   (`parseDynamicText` :620) — BOTH already compensate separately via `applyMirrorFlip()` at :857. An in-function call
@@ -945,11 +936,10 @@ need different fixes.
 **Related (separate, not a dependency):** shares the ungroup/`removeFromGroup` path with the LAYER 2 readability entry.
 Distinct concern (this = mirror geometry; that = rotation orientation display). Whoever codes second must not regress
 the first in the shared function.
-**Next:** investigation COMPLETE — both manifestations measured AND visually confirmed separate (`ungroup-mirror-split`,
-2026-06-24); nothing left to characterize. Remaining work is the TWO fixes above, as a future scoped session: the
-shared live `correctTextReadability` hook (low-risk; also closes the create-text entry) and the `removeFromGroup`
-design-frame re-expression (trickier — it touches the shared detach that is *correct* for unmirrored ungroup, so write
-a verification matrix first). NOTE: explicitly logged as future work — not today's task.
+**Next:** the live `correctTextReadability` hook is DONE (ade229881). Remaining work is the ONE positional fix: the
+`removeFromGroup`/`addToGroup` design-frame re-expression (trickier — it touches the shared detach that is *correct*
+for unmirrored ungroup, so write a verification matrix first). Start from the −38.31 ≈ 2×19.16 doubling/sign-flip
+clue above. NOTE: explicitly logged as future work — not today's task.
 
 ### Grouped text at non-cardinal angles: offset overridden on ungroup/regroup  · DEFERRED (edge case)
 **Area:** element text rotation/readability · **Branch:** mirror-flip-rotate
