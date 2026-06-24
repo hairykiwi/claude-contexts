@@ -340,12 +340,22 @@ for reading but fail to write through one.
   clone of the QET repo. Backed up via: github.com/hairykiwi/claude-contexts
 
 **Context file management — division of labour (explicit, this is the default)**
-**CC-TASKS.md: CC's to maintain, commit, and push by default —
-  confirmation gates the push, not the commit.** After CC's own code commits or
-  investigation findings, update CC-TASKS.md and commit it locally with a drafted
-  message. Push only after User confirms — the commit itself doesn't wait.
-  CC-TASKS.md is a personal working record in a separate repo, not upstream-facing,
-  low cost to be wrong and easy to correct.
+- **CC-TASKS.md: ONE narrow no-gate exception, everything else needs User's
+  input BEFORE drafting, not just before pushing.** Pure post-build status
+  (build succeeded/failed, binary rebuilt, mtime, fresh/clean) — CC drafts and
+  commits directly, no check needed first; push still waits for confirmation,
+  same as always. EVERYTHING ELSE that goes into CC-TASKS.md — test results,
+  CC's own analysis/interpretation, root-cause framing, severity calls, ANY
+  conclusion that isn't a plain build-status fact — gets the SAME standard as
+  a QET source-code commit: report the findings to User first, propose the
+  entry/commit message, wait for explicit go-ahead, THEN commit. Don't draft
+  silently and report afterward; say plainly that CC-TASKS.md is being held
+  pending User's input, so it's never ambiguous whether it's already written.
+  Reason: User's response routinely adds a recollection or correction that
+  changes the right framing — catching that before it's written down beats
+  fixing a committed entry after. CC-TASKS.md being a low-stakes, easy-to-fix
+  personal record is not a reason to skip an easy chance to get it right the
+  first time when User's input is reliably one message away.
 - **CLAUDE.md: User's file, maintained working in conjunction with Claude
   chat.** CC must NOT edit or push CLAUDE.md directly, ever, by default.
 - **Exceptions to either default must be stated explicitly, in the moment,
