@@ -16,6 +16,78 @@ orientation and future-fix insight. Don't duplicate diffs here; do keep reasonin
 
 ## ACTIVE
 
+### Shared live-compensation fix: correctTextReadability at three attach sites  · NEEDS-TEST (matrix incomplete) · branch mirror-flip-rotate
+**What:** add a post-attach `Element::correctTextReadability(item)` at the three live text-attach
+call SITES so a text attached to an already-mirrored/flipped element compensates immediately instead
+of drawing geometrically reflected until the next M/F/R or reload. Closes the "new text on already-
+mirrored/flipped element" OPEN entry and the geometric-mirror half of the ungroup entry, via one shared
+helper (the existing public `correctTextReadability`, element.cpp:1210 — readability + `compensateMirrorFlip`
+when mirror/flip; no-op otherwise). NOT inside `addDynamicTextItem` (load path already compensates via
+`applyMirrorFlip`; an in-function hook would double-fire). Sites:
+- `Element::removeTextFromGroup` (element.cpp, ungroup) → `correctTextReadability(text)` (target = text).
+- `AddElementTextCommand::redo` (create) → `m_element->correctTextReadability(m_text)` (target = text).
+- `DeleteQGraphicsItemCommand::undo` (delete-undo): ungrouped branch → `correctTextReadability(deti)`;
+  grouped branch → `correctTextReadability(group)` AFTER `addTextToGroup` (target = the GROUP, matching how
+  applyMirrorFlip compensates grouped texts — NOT identical to the other two sites; the brief's
+  "don't assume site 1 generalizes" case).
+**Scope guard:** the removeFromGroup positional-displacement (~14–24px) fix is SEPARATE and out of scope;
+the non-cardinal-angle DEFERRED entry is out of scope. `addDynamicTextItem` itself untouched.
+**Structural confirmation (measured):** `toXml` serializes only pos/rotation (dynamicelementtextitem.cpp:93-95),
+NOT the QTransform; our change sets only the transform and is a no-op on pos/rotation for a fresh text
+(net=0). Proof from the two POST-FIX save files (`debug-logs/qet-re-test-b0a405329-POST-FIX-save-after text
+placed on mirrored*.qet`): every text shared between the mirror+flip file and the mirror-only file has
+IDENTICAL saved x/y/rotation despite the differing flip flag ⇒ saved bytes are fix-independent; reload is
+governed entirely by the unchanged load path.
+**Test status (2026-06-24, build mtime 10:04):** T1 ungroup PASS. T2 create LIVE PASS; reload portion
+NOT validated — User reported the reload "looked different" but explicitly is NOT confident in that
+recollection (treat as UNCONFIRMED, re-observe fresh; do NOT record it as "User saw a reload regression").
+The T2 run was then interrupted by the unrelated toolbar-cursor crash below (NOT a regression). T3 (delete-undo
+ungrouped), T4 (delete-undo grouped), T5 (displacement regression), T6 (load sanity) NOT YET RUN. Do not
+commit until matrix passes. Staged set when ready (named files only, never main.cpp): element.cpp,
+addelementtextcommand.cpp, deleteqgraphicsitemcommand.cpp.
+
+**>>> RESUME AFTER REBOOT (for the fresh /clear session) <<<**
+State on disk (persists across reboot):
+- Source edits are PRESENT but UNCOMMITTED in the working tree — element.cpp (removeTextFromGroup),
+  addelementtextcommand.cpp (redo), deleteqgraphicsitemcommand.cpp (undo). Verify with
+  `git -C ~/qelectrotech diff --stat sources/qetgraphicsitem/element.cpp sources/undocommand/addelementtextcommand.cpp sources/undocommand/deleteqgraphicsitemcommand.cpp`.
+- `build_qt6/qelectrotech` (mtime 2026-06-24 10:04) ALREADY contains the fix — no rebuild needed unless
+  the source is re-edited. (Also present uncommitted: the permanent local build-enablers incl. main.cpp —
+  never stage them.)
+- Launch is OK post-reboot (User authorized CC to launch QET backgrounded with a log; log to
+  `~/qelectrotech/debug-logs/livecomp-rerun-<purpose>.log`). CC must NEVER kill it — User quits via GUI
+  after the schedule. If launch silently exits, SingleApplication stale shm may still be set → reboot again.
+RERUN TEST SCHEDULE (anchor name: `livecomp-rerun`) — run against the 10:04 binary:
+- T2-reload: on an already mirror+flip element add a new dynamic text → save → reload. Confirm the reloaded
+  layout MATCHES the live layout (live==reload). ✅ no double-compensation / new-text reads correctly.
+  (Avoid hovering the toolbar right after load — that triggers the separate cursor crash.)
+- T3 delete-undo (ungrouped text on a mirror/flip element): delete a text, undo → restores correct, no
+  subsequent transform needed.
+- T4 delete-undo (GROUPED text on a mirror/flip element): delete a grouped text, undo → restores correct;
+  group not double-reflected. (Exercises the group-target branch — the site that does NOT mirror sites 1/2.)
+- T5 displacement regression: confirm the persisted ~14–24px ungroup displacement is UNCHANGED by this fix
+  (this fix doesn't touch that mechanism; confirm, don't assume — e.g. the "Text 1"/"Text 3" overlap seen in T1).
+- T6 load sanity: open an existing mirror/flip-with-text file → no double-compensation artifact.
+ON FULL PASS: propose commit msg + staged list (the 3 named files only), get explicit approval, commit,
+then `cd build_qt6 && cmake .. <canonical> && make -j8` (refresh GitRevision), push origin mirror-flip-rotate.
+ON FAIL: fix before committing. Test files: save under the `livecomp-rerun` anchor name (swap extension).
+
+### macOS/Qt6 toolbar-cursor CGImage crash (SIGTRAP, unrelated to feature work)  · OPEN (known-issue candidate; pre-existing) · branch mirror-flip-rotate
+**Crash:** SIGTRAP / EXC_BREAKPOINT (NOT the SIGSEGV/0x24 panel-UAF family). Report
+`~/Library/Logs/DiagnosticReports/qelectrotech-2026-06-24-103714.ips`. Backtrace:
+`CGImageCreate ← QImage::toCGImage ← QCocoaCursor::createCursorData ← QCocoaCursor::changeCursor ←
+QToolBar::event (cursor change) ← mouse event` — CoreGraphics rejects an invalid/null image colorspace
+when converting a cursor QImage to CGImage. Fires on mousing over a toolbar; zero frames touch text/
+mirror/flip/fromXml/our code. Surfaced during the live-compensation T2 reload (interrupted the test) but
+is NOT caused by it. Distinct from the elements-panel UAF (different signal, different stack). Severity:
+medium-nuisance — can interrupt any GUI session; not data-related. Next if pursued: identify which QET
+toolbar cursor pixmap has an invalid colorspace under Qt6 (likely a tool/drag cursor).
+
+### Delete-button tooltip says "Delete selection" for a button that also ungroups  · OPEN (low-priority GUI mod) · branch mirror-flip-rotate
+**Finding (User, 2026-06-24):** the Delete toolbar/UI button tooltip reads "Delete selection", but the same
+button also performs the ungroup function — potentially confusing. Consider differentiating the
+ungroup vs delete affordance (separate tooltip text, or split the action). Low priority, cosmetic UX.
+
 ### Rebase mirror-flip-rotate onto the rebased qt6_cmake_joshua  · DONE (force-pushed 2026-06-23) · branch mirror-flip-rotate
 **What:** moved the feature divergence onto the freshly-rebased qt6_cmake_joshua (`d00f3613d`).
 `git rebase --onto qt6_cmake_joshua <merge-base 082947266> mirror-flip-rotate`. Of 19 commits, **17
