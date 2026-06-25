@@ -786,6 +786,23 @@ Encode the state directly in one attribute: `keep_visual_rotation="true" | "fals
   dynamictextfieldeditor.cpp:142/432; the "grey out rotate" half (#7b) needs to distinguish
   MVR (rotate dead) / ISO (rotate overridden) / Free (rotate live) — which a bool cannot express.
 
+**UI terminology — FINALIZED (decided spec point, no implementation):** applies to the Text
+Properties / right-click exposure (FEATURE IDEA #7). The Element-editor (PartDynamicTextField)
+side gets the same nomenclature alignment in a LATER pass — out of scope for this decision.
+- Right-click menu row label: **"Text Orientation:"** — chosen to read distinctly from any nearby
+  numeric rotation-angle control. Sanity check done: the folio Text Properties model already has a
+  numeric **"Rotation"** row (dynamicelementtextmodel.cpp:329/793) and the current
+  keep_visual_rotation checkbox **"Conserver la rotation visuel"** (line 345); neither uses
+  near-identical wording, so "Text Orientation:" is unambiguous against both.
+- Three radio options → RotationMode enum:
+  - **"Upright"** → `KeepUpright` (the current behaviour; the internal shorthand "MVR" must NEVER
+    appear in this or any other user-facing string — same standing nomenclature rule as
+    code/commits)
+  - **"ISO"** → `IsoLayout`
+  - **"Free"** → `Free`
+- New lang-file entries required when implemented: "Text Orientation:", "Upright", "ISO", "Free" —
+  flag for translation at implementation time; not needed today.
+
 ### Rotated-element text readability — LAYER 2 (de-rotation + layout)  · RESOLVED — [WIP] on 6f8dd772c CLOSED (Phenomenon B + correction-trigger lag both fixed; OFF-default orientation-forcing since removed)
 **Status (Jun 2026):** classifier gate-1 PASSED (logical-state parity/theta reproduces the 24-cell table); orientation correction built and gates α (layer-1 regression clean), β (no rotation drift; OFF confirmed forward-acting — orientation PASS), γ (24-cell orientation+position+save/reload) all PASS. Position fix for the grouped+flip ~group-height displacement committed separately as b0a405329. Orientation correction committed as 6f8dd772c, flagged [WIP] at the time pending Phenomenon B (below).
 **UPDATE (Jun 2026, later same week):** Phenomenon B is now FIXED — see RESOLVED entry below (bd61ca17c, pivot fix on the "Rotate 90°" quick-rotate path; the dialog path, `RotateTextsCommand`, was already correct). A nomenclature-normalization follow-up also landed as feeef3cea (strips internal layer/MVR/gate shorthand from element.cpp/.h comments + identifiers — `mvr`→`keep_visual_rotation`, `rotateAboutOwnCentre`→`rotateAboutOwnCenter`, `bbox`→`bounding rect`; no behavioural change). [WIP] on 6f8dd772c is NOT closed: a separate, newly-identified correction-trigger lag remains open (own-rotation-change doesn't re-fire `correctReadability` until the next element-level rotate/mirror/flip) — see new ACTIVE entry below. The tempered commit message on 6f8dd772c (no unqualified "ISO-conformant by default" claim) remains accurate; the trigger lag is now the documented residual caveat in place of Phenomenon B.
@@ -1244,6 +1261,8 @@ layer-2 correctness work (this is UI affordance over that behaviour); touches
 menu/UI code, not the geometry — cleaner as its own commit/PR. PERSISTENCE/encoding
 for the third state is scoped: see "ISO-layout tri-state — persistence/encoding scoping"
 (accepted recommendation: single tri-valued `keep_visual_rotation="true"|"false"|"iso"`).
+UI TERMINOLOGY also finalized there: row label "Text Orientation:" with radios
+"Upright"/"ISO"/"Free" → RotationMode KeepUpright/IsoLayout/Free.
 
 ### 8. Non-destructive Rotate/Mirror/Flip RESET
 Clear all transforms on a selected element, returning it to its on-disk render,
