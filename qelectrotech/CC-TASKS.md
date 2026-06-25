@@ -695,6 +695,97 @@ raw and corrected rotation, the on-screen footprint must be identical between th
 (green light given) — see the "Remove MVR-OFF readability forcing — free rotation is the new
 default" entry at the top of ACTIVE for the change actually made.
 
+### ISO-layout tri-state — persistence/encoding scoping  · SCOPING COMPLETE (no implementation) · RECOMMENDATION RECORDED · branch mirror-flip-rotate
+**Question:** if `keep_visual_rotation` becomes a genuine tri-state (MVR-ON / ISO-layout /
+free-rotation=current OFF; UI exposure = FEATURE IDEA #7), how is the third state PERSISTED in
+the `.qet`/`.elmt` XML without breaking file readability by a pre-ISO-layout build?
+
+**What an ABSENT `keep_visual_rotation` attribute means today, per origin (each confirmed
+independently against the live tree, not assumed):**
+- Legacy `<input>` text (`Element::parseInput`, element.cpp:555-598): the `<input>` schema never
+  had this attribute. Converted via `new DynamicElementTextItem(this)`; `parseInput` never calls
+  `setKeepVisualRotation` → inherits the in-class default `m_keep_visual_rotation = true`
+  (dynamicelementtextitem.h:174) → **ON**.
+- Folio `<dynamic_elmt_text>` (`DynamicElementTextItem::fromXml:165`): `attribute(...,"true")` →
+  absent → **ON** (constructor default also true, consistent).
+- Element-editor `<dynamic_text>` (`PartDynamicTextField::fromXml:213`): absent → **ON at load**.
+  BUT a freshly-created, not-yet-loaded part defaults `m_keep_visual_rotation = false`
+  (partdynamictextfield.h:132) → **OFF**. This creation-default (OFF) and the load-from-absent
+  default (ON) genuinely DISAGREE — the "opposite default" — but only the load default governs
+  file interpretation, and a new part is written with the attribute EXPLICIT, so its OFF never
+  reaches disk as absence.
+- Unifying fact: BOTH save paths write the attribute UNCONDITIONALLY today
+  (dynamicelementtextitem.cpp:100, partdynamictextfield.cpp:149). So no current build ever
+  PRODUCES absence. Absence in any real file comes only from (a) legacy `<input>`, or (b)
+  pre-attribute files (the 0.7-dev retrocompat boundary, dynamicelementtextitem.cpp:173) — all of
+  which resolve to ON. Effective per-file answer today: "absent ⇒ ON."
+
+**Mechanism A — overload absence (rejected as the carrier).** Candidate: ISO-layout selection
+DELETES the attribute; MVR/OFF write it explicitly. Collision: a file with the attribute absent
+because the user chose ISO is byte-identical to a legacy-absent file (→ ON). Disambiguation is
+POSSIBLE but only via the existing project version gate: the `.qet` root carries
+`version="<currentVersion>"`, written unconditionally on every save (qetproject.cpp:937 →
+`QetVersion::toXmlAttribute`, currentVersion()=0.100.1), read into `m_project_qet_version`
+(qetproject.cpp:1381), and ALREADY used as a behavioural reinterpretation gate
+(`if (m_project_qet_version <= QetVersion::versionZeroDotSix())`, qetproject.cpp:1411). So
+"absence means ISO iff version ≥ ISO-release" maps onto the established
+`m_project_qet_version < QetVersion::someVersion()` idiom — VIABLE, no new marker needed — BUT
+contingent on a DELIBERATE `currentVersion()` bump at the ISO release (currentVersion is one
+global bumped per release, not per commit: pre-ISO and ISO dev builds stamp the SAME number, so
+the gate is clean only at a release boundary, muddy for dev-build files). Also note `.elmt`
+definitions DO write the same version attr (elementscene.cpp:452) but it is WRITE-ONLY — nothing
+reads element-definition version for any gate (only qetproject reads `fromXmlAttribute`), so an
+`.elmt`-level gate would need a reader added with no precedent.
+
+**Mechanism B — single tri-valued attribute · ACCEPTED RECOMMENDATION.**
+Encode the state directly in one attribute: `keep_visual_rotation="true" | "false" | "iso"`.
+- Why it removes the version-bump requirement: it does NOT overload an existing signal. Absence
+  keeps its legacy meaning (→ ON) untouched; ISO is signalled only by the NEW value `"iso"`,
+  which legacy files never carry. Nothing to disambiguate ⇒ no version gate, no currentVersion()
+  bump needed for this feature.
+- Pre-ISO build reads it gracefully (confirmed against code): load reads only NAMED attributes via
+  `attribute(name,default)`; `valideXml` (element.cpp:664) checks only required attrs and never
+  rejects extras/unknown values; `QDomDocument::setContent` is non-validating. An old build hits
+  `attribute("keep_visual_rotation","true") == "true"` → `"iso" == "true"` is FALSE → sets
+  false → **OFF (free rotation)** — the conservative fallback (a build lacking the ISO actuator
+  does nothing rather than reorienting). File stays fully readable.
+- Precedent: this IS QET's standard additive schema-evolution idiom — `keep_visual_rotation`
+  itself, and `font` (the dynamicelementtextitem.cpp:173 "added lately" retrocompat comment), were
+  all introduced this way. The versionZeroDotSix gate is the EXCEPTION, used only to reinterpret
+  EXISTING data — which Mechanism B specifically avoids needing.
+- Preferred over a two-flag form (`keep_visual_rotation="false"` + new `iso_layout="true"`):
+  functionally equivalent forward-compat (old build ignores the unknown `iso_layout`, reads
+  false → OFF; same graceful degrade), but two flags can express the contradictory combination
+  `keep="true"`+`iso="true"`, forcing the loader to define a precedence rule. The single tri-value
+  attribute cannot represent an undefined state, so no normalization rule is needed.
+- THE ONE CAVEAT (true of Mechanism B AND the two-flag form, and of all additive XML evolution):
+  round-trip THROUGH a pre-ISO build that RE-SAVES degrades ISO → OFF permanently, because
+  `toXml` is constructive (dynamicelementtextitem.cpp:89-149 builds a fresh element, writes only
+  known fields — it never preserves unknown attributes/values). Milder than Mechanism A's
+  version-cliff: bites only on an actual save by an old build, not on mere reading, and degrades
+  to a sensible state.
+
+**What a genuine tri-state then needs (if/when implemented — viable per Mechanism B):**
+- XML: one attribute, three string values (above); save writes the value; load maps it. No
+  version dependency.
+- Data model: `m_keep_visual_rotation` is a plain `bool` in BOTH classes
+  (dynamicelementtextitem.h:174, partdynamictextfield.h:132), exposed as
+  `Q_PROPERTY(bool keepVisualRotation …)` with a `keepVisualRotationChanged(bool)` signal.
+  Tri-state ⇒ enum (e.g. `RotationMode {KeepUpright, IsoLayout, Free}`). Consumers needing update:
+  getter/setter + Q_PROPERTY + signal (both classes); toXml/fromXml both classes
+  (dynamicelementtextitem.cpp:100/165, partdynamictextfield.cpp:149/213);
+  `Element::correctReadability(item,bool)` (element.cpp:1196), which today is only
+  `if(keep) rotateAboutOwnCenter(item,-net_raw)` — the tri-state RE-ADDS the ISO actuator (the
+  `if(inverted) rotateAboutOwnCenter(item,180)` that 207d3cc5b removed), gated on `IsoLayout`,
+  fed by the now-dormant gate-1 `inverted` classifier; the 6 bool call sites
+  (element.cpp:1088,1094,1213,1217,1243,1247); the `QPropertyUndoCommand` round-trips
+  (dynamicelementtextmodel.cpp:625, dynamictextfieldeditor.cpp:438) which serialize via QVariant —
+  an enum needs Q_ENUM/registration or int-packing.
+- UI (FEATURE IDEA #7): the right-click 3-way (radio-style) exposure needs a single tri-valued
+  accessor (the enum) replacing the current bool checkbox at dynamicelementtextmodel.cpp:350 and
+  dynamictextfieldeditor.cpp:142/432; the "grey out rotate" half (#7b) needs to distinguish
+  MVR (rotate dead) / ISO (rotate overridden) / Free (rotate live) — which a bool cannot express.
+
 ### Rotated-element text readability — LAYER 2 (de-rotation + layout)  · RESOLVED — [WIP] on 6f8dd772c CLOSED (Phenomenon B + correction-trigger lag both fixed; OFF-default orientation-forcing since removed)
 **Status (Jun 2026):** classifier gate-1 PASSED (logical-state parity/theta reproduces the 24-cell table); orientation correction built and gates α (layer-1 regression clean), β (no rotation drift; OFF confirmed forward-acting — orientation PASS), γ (24-cell orientation+position+save/reload) all PASS. Position fix for the grouped+flip ~group-height displacement committed separately as b0a405329. Orientation correction committed as 6f8dd772c, flagged [WIP] at the time pending Phenomenon B (below).
 **UPDATE (Jun 2026, later same week):** Phenomenon B is now FIXED — see RESOLVED entry below (bd61ca17c, pivot fix on the "Rotate 90°" quick-rotate path; the dialog path, `RotateTextsCommand`, was already correct). A nomenclature-normalization follow-up also landed as feeef3cea (strips internal layer/MVR/gate shorthand from element.cpp/.h comments + identifiers — `mvr`→`keep_visual_rotation`, `rotateAboutOwnCentre`→`rotateAboutOwnCenter`, `bbox`→`bounding rect`; no behavioural change). [WIP] on 6f8dd772c is NOT closed: a separate, newly-identified correction-trigger lag remains open (own-rotation-change doesn't re-fire `correctReadability` until the next element-level rotate/mirror/flip) — see new ACTIVE entry below. The tempered commit message on 6f8dd772c (no unqualified "ISO-conformant by default" claim) remains accurate; the trigger lag is now the documented residual caveat in place of Phenomenon B.
@@ -1150,7 +1241,9 @@ correction while MVR holds orientation — a dead/confusing control otherwise.
 The two pair naturally: greying-out rotate prompts "why?", and exposing MVR in
 the same menu answers it. Either alone is half the story. Separate from the
 layer-2 correctness work (this is UI affordance over that behaviour); touches
-menu/UI code, not the geometry — cleaner as its own commit/PR.
+menu/UI code, not the geometry — cleaner as its own commit/PR. PERSISTENCE/encoding
+for the third state is scoped: see "ISO-layout tri-state — persistence/encoding scoping"
+(accepted recommendation: single tri-valued `keep_visual_rotation="true"|"false"|"iso"`).
 
 ### 8. Non-destructive Rotate/Mirror/Flip RESET
 Clear all transforms on a selected element, returning it to its on-disk render,
