@@ -124,6 +124,15 @@ live-update-on-toggle gap is pre-existing and independent of `207d3cc5b`. ("Repr
 not-a-rebase-regression — `917c01da9` already contains `207d3cc5b`; the setter-identity at `207d3cc5b^` is what
 proves it predates the ISO-layout removal.) **Severity:** low — cosmetic orientation lag; self-heals on any
 transform/reload; position never wrong.
+**UPDATE (2026-06-25) — now also gates the new tri-state selection (was T2 FAIL).** After the
+RotationMode migration the path is renamed but unchanged in substance: `DynamicElementTextModel`
+→ `QPropertyUndoCommand(deti, "rotationMode", …)` → `DynamicElementTextItem::setRotationMode`, which
+still sets the member + emits `rotationModeChanged` + manages connections but calls NO correction;
+`rotationModeChanged` has zero diagram-side readability listener. So selecting Upright/ISO/Free in
+Text Properties does not re-orient on Accept — it applies only on the next element M/F/R (T2 in the
+ISO-layout implementation entry below). Severity bumps from cosmetic to mild usability now that mode
+is a user-facing 3-way control. Fix = wire a diagram-side correction on `rotationModeChanged` (or call
+`Element::correctTextReadability` from the setter), as part of the one trigger-coverage pass.
 
 ### New text on an already-mirrored/flipped element draws reflected until next transform  · RESOLVED (ade229881) · branch mirror-flip-rotate
 **RESOLVED 2026-06-24 by the shared live-compensation fix (top entry, ade229881):** `AddElementTextCommand::redo`
@@ -802,6 +811,50 @@ side gets the same nomenclature alignment in a LATER pass — out of scope for t
   - **"Free"** → `Free`
 - New lang-file entries required when implemented: "Text Orientation:", "Upright", "ISO", "Free" —
   flag for translation at implementation time; not needed today.
+
+**IMPLEMENTATION LANDED (2026-06-25) — Mechanism B, combobox UI · two commits on mirror-flip-rotate.**
+What landed:
+- Data model: `m_keep_visual_rotation` bool → shared `DynamicElementTextItem::RotationMode`
+  {KeepUpright, IsoLayout, Free} enum (Q_ENUM), used by both DynamicElementTextItem and
+  PartDynamicTextField; getter/setter/Q_PROPERTY/signal renamed `rotationMode`; QPropertyUndoCommand
+  round-trips via `QVariant::fromValue`. `Element::correctReadability` dropped its bool param and now
+  resolves the mode internally (static `rotationModeForItem`) — sidesteps the element.h↔
+  dynamicelementtextitem.h include cycle; all 6 call sites simplified.
+- Persistence: single tri-valued `keep_visual_rotation="true"|"false"|"iso"`, both classes'
+  toXml/fromXml. Absent/"true"→KeepUpright, "false"→Free, "iso"→IsoLayout.
+- Actuator: ISO branch re-added to correctReadability (the recovered `207d3cc5b` classifier —
+  parity = m_mirror^m_flip, snapped net, inverted→180° about own centre), gated on IsoLayout.
+- UI: Text Properties tree row "Text Orientation:" combobox (Upright/ISO/Free), mirroring the
+  existing `textFrom` combobox pattern (default setEditorData/setModelData round-trip; read-back maps
+  DisplayRole label→mode like the `src_txt_row` textFrom case). Radios deferred to a follow-up — the
+  tree is rebuilt wholesale per element, so always-visible radios need persistent editors across the
+  rebuild + rowsInserted + commitData-on-toggle (fragile); value layer is widget-agnostic so the swap
+  stays localized to the delegate.
+- **Lang .ts: DEFERRED.** The 4 strings are tr()-wrapped (translatable, English fallback at runtime);
+  populating the 34 lang/*.ts is a project-wide `lupdate` sync = a separate maintainer/release commit,
+  NOT bundled into the feature diff. Outstanding action at release: run lupdate to extract
+  "Text Orientation:", "Upright", "ISO", "Free" (+ the renamed undo text "Modifier l'orientation
+  d'un texte d'élément").
+
+Test findings (2026-06-25, solid PARTIAL):
+- T1 (MVR→ISO no-op when upright, both parities) PASS — matches Step 0 (net=0 readable for all parity).
+- T2 (select ISO/Upright applies on Accept) **FAIL → it's the pre-existing toggle-lag**, see the
+  "keep_visual_rotation toggle doesn't re-fire readability correction live" OPEN entry above. Selecting
+  a mode sets the property but fires no correction; Upright/ISO snap only on the next element M/F/R.
+  NOT a regression (the old bool setter never called correctReadability either). Fixing it = the
+  tracked trigger-coverage pass; do NOT treat as new.
+- T3 (R90° under ISO, incl. after M/F/R) PASS.
+- T4.1 (Upright unaffected) PASS. T4.2 (Free unaffected) PASS, with a **minor caveat**: the reference
+  0° direction shifts with element M/F/R (most visible during element rotation). Stable, repeatable;
+  arguably should also be corrected during M/F/R. **Low priority.**
+- T5 reopen-ISO in THIS build PASS. T5 reopen-ISO in a PREVIOUS (pre-tri-state) build: the ISO
+  orientation is **RETAINED, not degraded to Free** — because the actuator's correction is baked into
+  the serialized rotation/pos, so an old build renders the already-corrected geometry (the MODE
+  degrades to Free, but the frozen angle persists). **Open question to revisit:** if MVR's intended
+  semantics were "hold the user-selected orthogonal orientation" rather than "force tops-up/Upright",
+  then the new `KeepUpright` may need further compensation to match MVR's true intent. Park until the
+  MVR-semantics intent is confirmed.
+- T6 (save/reload byte-stability, all three modes) PASS.
 
 ### Rotated-element text readability — LAYER 2 (de-rotation + layout)  · RESOLVED — [WIP] on 6f8dd772c CLOSED (Phenomenon B + correction-trigger lag both fixed; OFF-default orientation-forcing since removed)
 **Status (Jun 2026):** classifier gate-1 PASSED (logical-state parity/theta reproduces the 24-cell table); orientation correction built and gates α (layer-1 regression clean), β (no rotation drift; OFF confirmed forward-acting — orientation PASS), γ (24-cell orientation+position+save/reload) all PASS. Position fix for the grouped+flip ~group-height displacement committed separately as b0a405329. Orientation correction committed as 6f8dd772c, flagged [WIP] at the time pending Phenomenon B (below).
