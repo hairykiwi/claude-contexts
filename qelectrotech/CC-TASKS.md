@@ -856,6 +856,52 @@ Test findings (2026-06-25, solid PARTIAL):
   MVR-semantics intent is confirmed.
 - T6 (save/reload byte-stability, all three modes) PASS.
 
+**SESSION HANDOFF (2026-06-26) — trigger-lag fix IN FLIGHT, test INCOMPLETE. Resume here after /clear.**
+Git state on `mirror-flip-rotate` (NOT pushed — origin has neither commit yet):
+- `d3dca3c91` Migrate element-text keep-visual-rotation to a RotationMode tri-state (commit A: data
+  model + tri-value persistence + "Text Orientation:" combobox; ISO inert here).
+- `2f29dd770` Apply ISO readability correction for IsoLayout element text (commit B: the actuator).
+- **UNCOMMITTED working-tree edit** = the trigger-lag fix (commit C, not yet made): in
+  `sources/qetgraphicsitem/dynamicelementtextitem.cpp`, `setRotationMode` now calls
+  `m_parent_element->correctTextReadability(this)` after the connection block, guarded by
+  `m_parent_element && !parentGroup() && m_parent_element->dynamicTextItems().contains(this)` (excludes
+  construction + load + grouped; load re-settles via applyMirrorFlip element.cpp:857 regardless).
+  **Builds GREEN**, binary mtime 2026-06-25 23:55. Also note `sources/main.cpp` is modified = the
+  permanent app-name workaround, NEVER stage (standing rule).
+- Proposed commit C message (held): "Re-fire readability correction when element-text orientation
+  mode changes / DynamicElementTextItem::setRotationMode now re-runs the element-level
+  correctTextReadability, so changing a text's orientation mode in Text Properties applies immediately
+  instead of lagging until the next element rotate/mirror/flip. Restricted to an ungrouped text
+  already registered with its element, which excludes construction and the load path (where
+  applyMirrorFlip re-settles orientation); grouped texts are corrected through their group."
+
+Why the trigger-lag fix went IN setRotationMode (not a custom undo command or a subclass): the Text
+Properties apply() reconstructs a single-edit command via `QPropertyUndoCommand`'s copy ctor
+(dynamicelementtextitemeditor.cpp:89), which would strip any QUndoCommand subclass — so the correction
+must live in the setter, which the copy still reaches. Fires on both redo and undo (both call
+setRotationMode), so orientation follows the mode through undo/redo. NO new silent-rewrite risk:
+load-time correction already happens today via applyMirrorFlip(857), so the early setter fire is
+redundant-but-harmless on load.
+
+NEXT ACTIONS on resume (in order):
+1. Run the trigger-lag functional test TL1–TL4 (INCOMPLETE — not yet run). Definitions:
+   - TL1: Free text on element, rotate element 180° (text inverted), Text Properties → ISO → Accept ⇒
+     ✅ snaps readable IMMEDIATELY (❌ before-fix: stayed inverted until next M/F/R).
+   - TL2: text on a 90/180/270°-rotated element → Text Properties → Upright → Accept ⇒ ✅ tops-up at once.
+   - TL3: after TL1/TL2, Undo ⇒ orientation+dropdown revert; Redo ⇒ re-applies.
+   - TL4 (regression): re-run T6 (Upright+ISO+Free, save/reload/save) ⇒ byte-identical, no silent
+     rewrite; a Free text still doesn't auto-orient.
+   Use the binary built from the committed C state (rebuild after committing, or test the current
+   23:55 binary which already contains the fix — it is functionally identical to what C will commit).
+2. On PASS: commit C (stage ONLY dynamicelementtextitem.cpp — NOT main.cpp), with the message above.
+3. Push decision: T2 was the push-blocker; commit C clears it. Remaining open items are NOT blockers —
+   T4.2 (0° reference shifts with M/F/R, low priority) and T5 (MVR-semantics open question). If
+   pushing, follow the Source-code workflow step 6 (cmake .. reconfigure to refresh GitRevision, then
+   make, then push origin mirror-flip-rotate).
+4. Still outstanding (not blockers): lang .ts lupdate sync (4 strings, deferred to release); radios as
+   a follow-up to the combobox (value layer already widget-agnostic); the T5 MVR-semantics question
+   (park until intent confirmed).
+
 ### Rotated-element text readability — LAYER 2 (de-rotation + layout)  · RESOLVED — [WIP] on 6f8dd772c CLOSED (Phenomenon B + correction-trigger lag both fixed; OFF-default orientation-forcing since removed)
 **Status (Jun 2026):** classifier gate-1 PASSED (logical-state parity/theta reproduces the 24-cell table); orientation correction built and gates α (layer-1 regression clean), β (no rotation drift; OFF confirmed forward-acting — orientation PASS), γ (24-cell orientation+position+save/reload) all PASS. Position fix for the grouped+flip ~group-height displacement committed separately as b0a405329. Orientation correction committed as 6f8dd772c, flagged [WIP] at the time pending Phenomenon B (below).
 **UPDATE (Jun 2026, later same week):** Phenomenon B is now FIXED — see RESOLVED entry below (bd61ca17c, pivot fix on the "Rotate 90°" quick-rotate path; the dialog path, `RotateTextsCommand`, was already correct). A nomenclature-normalization follow-up also landed as feeef3cea (strips internal layer/MVR/gate shorthand from element.cpp/.h comments + identifiers — `mvr`→`keep_visual_rotation`, `rotateAboutOwnCentre`→`rotateAboutOwnCenter`, `bbox`→`bounding rect`; no behavioural change). [WIP] on 6f8dd772c is NOT closed: a separate, newly-identified correction-trigger lag remains open (own-rotation-change doesn't re-fire `correctReadability` until the next element-level rotate/mirror/flip) — see new ACTIVE entry below. The tempered commit message on 6f8dd772c (no unqualified "ISO-conformant by default" claim) remains accurate; the trigger lag is now the documented residual caveat in place of Phenomenon B.
