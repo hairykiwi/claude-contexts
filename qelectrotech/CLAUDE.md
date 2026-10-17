@@ -126,6 +126,28 @@ whenever the fix is additive (wording/nomenclature corrections, comment fixes) �
 only rewrite pushed history when the content itself must not survive (credentials,
 genuinely wrong information that can't simply be corrected forward).
 
+**AI disclosure and sign-off on commits**
+Adapted from openEMS's AI_POLICY.md; our own convention, not a QET upstream
+requirement. Applies to NEW commits only — never rewrite pushed history to add
+trailers.
+- Every commit ends with an AI tag, then `Signed-off-by:` as the LAST line
+  (use `git commit -s`). Signing off certifies the Developer Certificate of
+  Origin: User approves the message before commit (existing rule), so that
+  approval is the certification — only for diffs read and verified.
+  - `Assisted-by: Claude Code` — mechanical edits (renames, sweeps),
+    suggestions, debugging that User directed and reviewed.
+  - `Generated-by: Claude Code` — CC wrote substantial new logic or text.
+    When unsure, use Generated-by.
+- Use exactly these trailers. No `Co-Authored-By:`, no "Generated with Claude
+  Code" lines, no session IDs or links, no other auto-generated trailers.
+  This overrides Claude Code's own default attribution lines.
+- PR descriptions and issue reports: first line states whether AI was used.
+- Brevity: commits, PR descriptions and issue reports as concise as a human
+  would write them; trim before presenting.
+- Licence: confirm non-trivial changes are compatible with QET's licence (see
+  LICENSE in the QET repo); avoid large verbatim AI-generated blocks of
+  unclear provenance.
+
 ## Diagnosing hard / confusing bugs (measure, don't hypothesise)
 Hard-won from the rotation-text fix (multi-session, ~6 wrong turns, all from
 guessing ahead of data). When behaviour is confusing or a fix attempt fails:
@@ -381,8 +403,9 @@ stale-process surprises — that part is confirmed, not provisional anymore.
   if(NOT TARGET ...) guards to:
   `/opt/homebrew/share/ECM/modules/ECMGenerateQDoc.cmake`
   or the build will fail with duplicate target errors
-- zsh: use heredoc (git commit -F - << 'EOF') for commit messages
-  containing ! characters to avoid zsh history expansion errors
+- zsh: use heredoc (git commit -s -F - << 'EOF') for commit messages
+  containing ! characters to avoid zsh history expansion errors. End the
+  message at the AI tag line; `-s` appends Signed-off-by as the last line.
 - QSettings domain for this build is `org.qelectrotech.QElectroTech-Qt6`
   (because of the main.cpp app-name hack), NOT `qelectrotech`. Matters for
   `defaults read/write org.qelectrotech.QElectroTech-Qt6 <key>`.
@@ -443,7 +466,8 @@ Known remaining issues are listed below — keep in sync with commits.
   Joshua-cla (Qt6 branch author)
 - PR target: master for version-agnostic fixes (Laurent's request);
   qt6_cmake_joshua for Qt6-era feature work. Confirm per-PR.
-- Commit style: short summary line, blank line, bullet detail
+- Commit style: short summary line, blank line, bullet detail, then AI tag +
+  Signed-off-by trailers (see Coding guidelines > AI disclosure and sign-off)
 - Folio mirror/flip feature posted to forum (Code section, pid 23010);
   Laurent invited merge to master (pid 23013). Credits plc-user's
   Element-Editor rotate/flip/mirror (0.100-dev) + QET_ElementScaler (2022)
