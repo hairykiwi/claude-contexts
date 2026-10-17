@@ -258,7 +258,7 @@ just the touched file(s) against the target base.
 
 ## Build environment (macOS Apple Silicon)
 - Hardware: Mac Mini M4, macOS Tahoe (26.5)
-- Qt: 6.11.1 via Homebrew (`/opt/homebrew/opt/qt`)
+- Qt: 6.11.1+ via Homebrew (`/opt/homebrew/opt/qt`)
 - KF6: built from source via FetchContent (BUILD_KF6=ON), v6.22.0
 - pugixml: system install via Homebrew
 - Build directory: `build_qt6/`
