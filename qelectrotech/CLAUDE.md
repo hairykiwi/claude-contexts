@@ -208,8 +208,10 @@ IEC 60617 wiring diagrams, terminal strips, and multi-folio
 documentation.
 
 ## Active branch / current work
-- Active integration branch: `mirror-flip-rotate` (off `qt6_cmake_joshua`; clean-merges
-  `folio-mirror-flip` + cherry-picked layer-1 `843ba6898`). Latest commits, in order:
+- Active integration branch: `mirror-flip-rotate` (squashed Qt6/CMake port `d00f3613d`,
+  2026-06-23, committed on top of upstream `master` `d3cf8f26` — NOT descended from
+  `qt6_cmake_joshua` in git history, though the port's content came from that work;
+  clean-merges `folio-mirror-flip` + cherry-picked layer-1 `843ba6898`). Latest commits, in order:
   `b0a405329` (grouped+flip position fix), `6f8dd772c` (readability correction, [WIP] —
   see CC-TASKS.md ACTIVE for the residual trigger-lag item), `bd61ca17c` (text-rotate
   pivot fix), `feeef3cea` (nomenclature normalization). Push is fast-forward on origin;
@@ -247,14 +249,44 @@ this list go stale once something's actually done):**
 - Feature PR (folio mirror/flip) is already implemented on `folio-mirror-flip`;
   ready to rebase/submit. Laurent invited it to master (pid 23013).
 
+### Liveness check before ANY branch work (IMPORTANT — do not skip)
+Before developing, fixing, or opening a PR against a branch, confirm it is still the
+live target and that upstream hasn't already solved the problem. Lesson (2026-10-17):
+a fix was prepared and a PR opened against `qt6_cmake_joshua`, then found moot —
+`master` had solved both issues differently, and Laurent confirmed `qt6_cmake_joshua`
+was obsolete (forum pid 23513). Read-only, minutes, run at the start of every task
+that targets or branches from upstream:
+1. `git fetch upstream --prune`
+2. Activity: `git log -5 --format='%h %ci %an %s' upstream/<branch>`, and commit
+   counts (`git rev-list --count --since=30.days upstream/<branch>`; also 90/180).
+   Compare with `upstream/master`.
+3. Other newer branches: `git for-each-ref --sort=-committerdate
+   --format='%(committerdate:short) %(refname:short)' refs/remotes/upstream | head -15`
+4. Divergence: `git rev-list --left-right --count upstream/master...upstream/<branch>`,
+   and `git log upstream/master --since=<date> -- <paths you plan to touch>`.
+5. Already solved? Before writing code, search `upstream/master` for the same fix or
+   feature: `git grep -n <symbol> upstream/master -- <paths>` and
+   `git log upstream/master -i --grep=<keyword>`; also check upstream issues/PRs
+   (open AND closed) and the forum.
+Report the result to User as a short table BEFORE editing or branching, and wait if
+`master` is ahead or the feature may already exist there. If a maintainer says a
+branch is retired, record it in the PR-target line (Contribution context).
+- git grep gotcha: the ref goes BEFORE `--`. `git grep -n PAT upstream/master --
+  path` searches that ref; `git grep -n PAT -- path upstream/master` treats the ref
+  as a path and silently searches the working tree.
+
 ### Branching lesson (IMPORTANT — avoids re-deriving build fixes)
 Develop on a tree that ALREADY BUILDS; reconcile to the PR-target base only
 at PR time. Do NOT cut a working branch off FRESH upstream and then rediscover
-every macOS build fix — that cost most of a session on 2026-06-14. Fresh
-`upstream/qt6_cmake_joshua` and `master` do NOT build/run on macOS out of the
-box. The fix file for a given bug is usually byte-identical across branches, so
-you can develop on the fork's working tree and still produce a clean PR diff of
-just the touched file(s) against the target base.
+every macOS build fix — that cost most of a session on 2026-06-14. Historical:
+fresh `upstream/qt6_cmake_joshua` and `master` did not build/run on macOS then.
+As of 2026-10-17 a fresh `upstream/master` configures and builds cleanly on macOS
+arm64, tests included (its flag is `BUILD_KF`, KDE Frameworks built from source at
+the tag set in `cmake/fetch_kdeaddons.cmake`, not `BUILD_KF6`) — re-verify in a
+throwaway worktree before assuming either way. The fix file for a given bug is
+usually byte-identical across branches, so you can develop on the fork's working
+tree and still produce a clean PR diff of just the touched file(s) against the
+target base.
 
 ## Build environment (macOS Apple Silicon)
 - Hardware: Mac Mini M4, macOS Tahoe (26.5)
@@ -464,8 +496,9 @@ Known remaining issues are listed below — keep in sync with commits.
 - Upstream: github.com/qelectrotech/qelectrotech-source-mirror
 - Key upstream contacts: scorpio810 (Laurent, project manager),
   Joshua-cla (Qt6 branch author)
-- PR target: master for version-agnostic fixes (Laurent's request);
-  qt6_cmake_joshua for Qt6-era feature work. Confirm per-PR.
+- PR target: `master`. `qt6_cmake_joshua` is OBSOLETE (Laurent, forum pid 23513,
+  2026-10-18: master is the Qt6/CMake/KF line). Run the liveness check (Active
+  branch / current work) before targeting any other branch; confirm per-PR.
 - Commit style: short summary line, blank line, bullet detail, then AI tag +
   Signed-off-by trailers (see Coding guidelines > AI disclosure and sign-off)
 - Folio mirror/flip feature posted to forum (Code section, pid 23010);
