@@ -167,6 +167,10 @@ guessing ahead of data). When behaviour is confusing or a fix attempt fails:
   the cause — then fix THAT, not a symptom.
 - After 2-3 failed fixes, STOP coding and go back to measurement. Repeated fix
   failure means the mental model is wrong, not the patch
+- Before claiming a fix "still applies" (or is already done) on another branch, READ
+  the target function's body on that ref, not just its call sites. Call-site checks
+  gave a wrong verdict twice (2026-10): the `GuiPrivate` exclusion, and Crash A "still
+  applies" when `8a837a11d` had already guarded `getItemForDiagram`.
 
 ## Debug / instrumentation logs
 Write all instrumentation/debug logs to ~/qelectrotech/debug-logs/ (gitignored)
@@ -198,6 +202,17 @@ must perform a brief functional test relevant to the change:
   reproducible before-state), state "absence-confirmed" explicitly instead
   of implying a diff.
 
+- Automated regression test (preferred for ordering/lifetime defects, even when the
+  manual symptom is intermittent): add a headless test in `tests/qttest` with
+  `qet_add_app_test()` (boots a real QETApp offscreen via `qetapptest.h`; run with
+  `QT_QPA_PLATFORM=offscreen`) that forces the bad ordering deterministically. Build
+  it in a separate `build_asan/` dir with `-fsanitize=address,undefined
+  -fno-omit-frame-pointer`. Show RED on unpatched `master` (temporarily revert the
+  guard), then GREEN with the fix. If it cannot fail on `master`, the bug is already
+  fixed there: don't fake a failing test. Commit the fix and the test separately.
+  Keep code comments short (match neighbouring files); put the long justification in
+  the commit message / PR.
+
 This applies to all source code commits. CMake, documentation, and
 tooling-only commits may be pushed without a functional test at discretion.
 
@@ -208,16 +223,16 @@ IEC 60617 wiring diagrams, terminal strips, and multi-folio
 documentation.
 
 ## Active branch / current work
-- Active integration branch: `mirror-flip-rotate` (squashed Qt6/CMake port `d00f3613d`,
-  2026-06-23, committed on top of upstream `master` `d3cf8f26` — NOT descended from
-  `qt6_cmake_joshua` in git history, though the port's content came from that work;
-  clean-merges `folio-mirror-flip` + cherry-picked layer-1 `843ba6898`). Latest commits, in order:
-  `b0a405329` (grouped+flip position fix), `6f8dd772c` (readability correction, [WIP] —
-  see CC-TASKS.md ACTIVE for the residual trigger-lag item), `bd61ca17c` (text-rotate
-  pivot fix), `feeef3cea` (nomenclature normalization). Push is fast-forward on origin;
-  no force-push so far this branch — keep it that way (new commit > rewrite, when the
-  fix is additive).
-- Do NOT assume Qt5 APIs are available. Targets Qt 6.x with KF6.
+- Fork branch `mirror-flip-rotate` (squashed Qt6/CMake port `d00f3613d`, 2026-06-23,
+  on top of upstream `master` `d3cf8f26`; NOT descended from `qt6_cmake_joshua`) is
+  LEGACY as of 2026-10-18: upstream `master` has since implemented folio mirror/flip and
+  the rotation pivot itself (#1335, PR #813), so its feature commits duplicate upstream.
+  Do NOT start new work on it. Its fate (port anything unique, e.g. layer-2 text
+  readability, then archive) is an open decision. It is pushed history: no force-push,
+  no rebase. Commit-level detail lives in CC-TASKS.md, not here.
+- New work: run the Liveness check below, then branch from `upstream/master` in a
+  `git worktree` (keeps the fork's legacy build tree untouched).
+- Do NOT assume Qt5 APIs are available. Targets Qt 6.x with KDE Frameworks 6.
 
 ### Separating upstream-able fixes from in-progress feature work
 General principle, durable: a dev branch built for one feature often accumulates other
@@ -234,20 +249,16 @@ the fix's files/structure match upstream's current layout:
   direction as a bug report instead — describe what's wrong and how it was fixed on
   the fork, let upstream apply the equivalent fix to their own current code shape.
 
-**Current candidates (live snapshot — update or remove each as it resolves; don't let
-this list go stale once something's actually done):**
-1. **Rotation-pivot bug fix** — DONE, folded into `mirror-flip-rotate` via the
-   `843ba6898` cherry-pick; the originating branch is superseded, don't develop on it.
-2. **Elements-panel crash fixes** — report-shaped (fork's elements-panel files live at
-   different paths than upstream's current layout, e.g.
-   `sources/elementspanel/genericpanel.cpp` vs. upstream's `sources/genericpanel.cpp`).
-   Pre-existing upstream defects (origin `a82f6de23`), unrelated to the Qt6 port,
-   discovered incidentally while testing the mirror/flip feature. Family A (orphan
-   item) RESOLVED `ad69d989b`; Family B (project-open crash) root-caused to a narrow
-   freed-pointer race, repro elusive, defensive guard committed `917c01da9`. See
-   CC-TASKS.md for full detail.
-- Feature PR (folio mirror/flip) is already implemented on `folio-mirror-flip`;
-  ready to rebase/submit. Laurent invited it to master (pid 23013).
+**Current candidates (live snapshot, 2026-10-18 — update or remove each as it resolves;
+don't let this list go stale once something's actually done):**
+1. **Rotation-pivot fix and folio mirror/flip** — SUPERSEDED: upstream `master` implements
+   both (#1335, PR #813). The fork's `folio-mirror-flip` feature PR (invited by Laurent,
+   pid 23013) is no longer needed; don't rebase or submit it.
+2. **Elements-panel crash fixes** — pre-existing upstream defects (origin `a82f6de23`).
+   Crash A (highlight-current-page on a detached item) is already fixed on `master`
+   (`8a837a11d`). Crash B (project-open auto-select on a detached item) is PR-shaped
+   against `master`'s current layout: submitted from `fix/elements-panel-crashes` (guard
+   `64869810c` + regression test `959695ed5`, PR #1540). Status: CC-TASKS.md.
 
 ### Liveness check before ANY branch work (IMPORTANT — do not skip)
 Before developing, fixing, or opening a PR against a branch, confirm it is still the
@@ -281,29 +292,34 @@ at PR time. Do NOT cut a working branch off FRESH upstream and then rediscover
 every macOS build fix — that cost most of a session on 2026-06-14. Historical:
 fresh `upstream/qt6_cmake_joshua` and `master` did not build/run on macOS then.
 As of 2026-10-17 a fresh `upstream/master` configures and builds cleanly on macOS
-arm64, tests included (its flag is `BUILD_KF`, KDE Frameworks built from source at
-the tag set in `cmake/fetch_kdeaddons.cmake`, not `BUILD_KF6`) — re-verify in a
-throwaway worktree before assuming either way. The fix file for a given bug is
-usually byte-identical across branches, so you can develop on the fork's working
-tree and still produce a clean PR diff of just the touched file(s) against the
-target base.
+arm64, tests included — re-verify in a throwaway worktree before assuming either
+way. The fix file for a given bug is usually byte-identical across branches, so you
+can develop on the fork's working tree and still produce a clean PR diff of just the
+touched file(s) against the target base.
 
 ## Build environment (macOS Apple Silicon)
-- Hardware: Mac Mini M4, macOS Tahoe (26.5)
+- Hardware: Mac Mini M4, macOS Tahoe (26.x)
 - Qt: 6.11.1+ via Homebrew (`/opt/homebrew/opt/qt`)
-- KF6: built from source via FetchContent (BUILD_KF6=ON), v6.22.0
+- KDE Frameworks: built from source by default (`BUILD_KF`); the tag is set in
+  `cmake/fetch_kdeaddons.cmake` (v6.10.0 on `master`, 2026-10-18). Use `-DBUILD_KF=OFF`
+  only to use a system KF install.
+- Fork legacy branch `mirror-flip-rotate` only: also pass `-DBUILD_KF6=ON` (KF v6.22.0); `master` ignores that flag. Delete this line when the branch is archived.
 - pugixml: system install via Homebrew
 - Build directory: `build_qt6/`
-- Canonical CMake configure command:
+- Canonical CMake configure command (`master`):
   cmake .. -DCMAKE_PREFIX_PATH=/opt/homebrew/opt/qt \
            -DQt6_DIR=/opt/homebrew/opt/qt/lib/cmake/Qt6 \
-           -DBUILD_KF6=ON \
            -DCMAKE_POLICY_VERSION_MINIMUM=3.5 \
            -DCMAKE_POLICY_DEFAULT_CMP0002=OLD \
            -DCMAKE_BUILD_TYPE=Debug
+- Confirmed 2026-10-18 from `~/qet-crash-fixes/build_asan/CMakeCache.txt` (cut from
+  current `master`; recovered from the cache, not re-run). Add `-DPACKAGE_TESTS=ON` only
+  to build `tests/qttest`. ASan builds also set `CMAKE_C_FLAGS`/`CMAKE_CXX_FLAGS` to
+  `-fsanitize=address,undefined -fno-omit-frame-pointer` and `CMAKE_EXE_LINKER_FLAGS` to
+  `-fsanitize=address,undefined`.
 - Build command: make -j8
   (-j8 is plenty for single-file test rebuilds; core count is within noise
-   there and only matters for a full KF6-from-source rebuild. M4 has 10 cores.)
+   there and only matters for a full KF-from-source rebuild. M4 has 10 cores.)
 - After ANY `cmake ..` configure (full or reconfigure), VERIFY the dev paths
   resolved. Run the grep SEPARATELY — do NOT pipe cmake through grep: piping
   hides non-matching errors and makes the exit status grep's, not cmake's
@@ -311,16 +327,6 @@ target base.
     grep -iE "QET_LANG_PATH|relative to binary" <configure output>
   or just scan the printed "Paths used for compilation" block. Confirm the
   paths show e.g. `QET_LANG_PATH lang/ (relative to binary)` — NOT `/usr/local/...`.
-
-## macOS dev build — local-only build-enablers
-As of 2026-06-30, the only local-only, never-committed file is `sources/main.cpp`
-(line 209, app-name workaround for SingleApplication conflict vs a parallel Qt5
-build — apply manually for dev builds only, never stage or commit). The fixes
-this section used to track (CMakeLists.txt install(FILES) guards, KF6
-FetchContent doc-gen skip, dev-build resource paths, several Qt6 migration
-casts) are confirmed committed natively on both `qt6_cmake_joshua` and
-`mirror-flip-rotate` (live grep against both branches, 2026-06-30) — a fresh
-checkout of either builds and runs with no manual file recovery.
 
 ## Context files (CLAUDE.md + CC-TASKS.md) accessibility and management
 
